@@ -23,6 +23,13 @@ builder.Services.AddDbContext<AppDbContext>(
     opt => opt.UseNpgsql(connectionString),
     optionsLifetime: ServiceLifetime.Singleton);
 
+// JWT signing key comes from configuration (Jwt__Key env var outside development).
+// Fail fast at startup rather than issuing tokens signed with a missing/weak key.
+var jwtSection = builder.Configuration.GetSection(JwtOptions.SectionName);
+var jwtOptions = jwtSection.Get<JwtOptions>() ?? new JwtOptions();
+jwtOptions.Validate();
+
+builder.Services.Configure<JwtOptions>(jwtSection);
 builder.Services.AddSingleton<TokenService>();
 builder.Services.AddSingleton<PasswordService>();
 
@@ -33,16 +40,16 @@ builder.Services.AddCors(o => o.AddPolicy(CorsPolicy, p => p
     .AllowAnyMethod()
     .AllowCredentials()));
 
-var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(TokenService.SecretKey));
+var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.Key));
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
-            ValidIssuer = "HelloDoctor",
+            ValidIssuer = jwtOptions.Issuer,
             ValidateAudience = true,
-            ValidAudience = "HelloDoctor",
+            ValidAudience = jwtOptions.Audience,
             ValidateIssuerSigningKey = true,
             IssuerSigningKey = key,
             ValidateLifetime = true,

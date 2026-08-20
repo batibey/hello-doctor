@@ -2,13 +2,22 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using HelloDoctor.Api.Models;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
 namespace HelloDoctor.Api.Services;
 
 public class TokenService
 {
-    public const string SecretKey = "hello-doctor-super-secret-demo-key-change-in-prod-0123456789";
+    private readonly JwtOptions _options;
+    private readonly SigningCredentials _credentials;
+
+    public TokenService(IOptions<JwtOptions> options)
+    {
+        _options = options.Value;
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_options.Key));
+        _credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+    }
 
     public string CreateToken(User user)
     {
@@ -21,14 +30,12 @@ public class TokenService
             new("email", user.Email),
         };
 
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(SecretKey));
-        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         var token = new JwtSecurityToken(
-            issuer: "HelloDoctor",
-            audience: "HelloDoctor",
+            issuer: _options.Issuer,
+            audience: _options.Audience,
             claims: claims,
-            expires: DateTime.UtcNow.AddDays(7),
-            signingCredentials: creds);
+            expires: DateTime.UtcNow.AddDays(_options.ExpiryDays),
+            signingCredentials: _credentials);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
     }

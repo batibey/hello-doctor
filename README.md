@@ -53,6 +53,26 @@ cd frontend && node hub-test.mjs
 
 SignalR üzerinden mesaj iletimi, veritabanına yazım, yazıyor göstergesi ve WebRTC sinyalleşme el sıkışmasını uçtan uca doğrular.
 
+## Yapılandırma
+
+Ayarlar `backend/appsettings.json` içinde; her biri ortam değişkeniyle geçersiz kılınabilir. İç içe anahtarlar çift alt çizgi ile yazılır (`Jwt:Key` → `Jwt__Key`).
+
+| Değişken | Açıklama |
+|---|---|
+| `Jwt__Key` | JWT imza anahtarı. **Üretimde zorunlu**, en az 32 bayt. |
+| `Jwt__ExpiryDays` | Token ömrü (varsayılan 7) |
+| `ConnectionStrings__Postgres` | Veritabanı bağlantı dizesi |
+
+Geliştirmede anahtar `appsettings.Development.json` içinden gelir, ek kurulum gerekmez. Bu değer yalnızca yereldir ve üretimde kullanılmamalıdır.
+
+Üretimde anahtar tanımsız veya 32 bayttan kısaysa uygulama **açılmayı reddeder** — zayıf anahtarla token imzalamaktansa erken hata vermeyi tercih eder.
+
+```bash
+export Jwt__Key="$(openssl rand -base64 48)"
+export ConnectionStrings__Postgres="Host=…;Database=…;Username=…;Password=…"
+dotnet run --no-launch-profile
+```
+
 ## Veritabanı
 
 Bağlantı dizesi `backend/appsettings.json` içinde. Konteyner **5433** portunda çalışır (yerel bir Postgres ile çakışmaması için).
@@ -77,4 +97,4 @@ Sorgu desenlerine göre indeksler: `(ConversationId, SentAt)` sohbet açılış�
 
 - WebRTC yalnızca `localhost` veya HTTPS üzerinde çalışır. Telefondan LAN IP'siyle test için HTTPS gerekir.
 - STUN sunucusu public Google STUN. Simetrik NAT arkasında bağlantı için TURN sunucusu eklenmelidir.
-- JWT imzalama anahtarı `TokenService.cs` içinde sabit — canlıya çıkmadan önce ortam değişkenine taşınmalı.
+- Veritabanı şifresi `appsettings.json` içinde geliştirme değeriyle duruyor; üretimde `ConnectionStrings__Postgres` ile geçersiz kılın.
