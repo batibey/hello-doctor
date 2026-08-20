@@ -3,7 +3,10 @@ import { useRealtime } from '../context/RealtimeContext'
 import { Avatar, Icon } from './ui'
 
 export default function CallOverlay() {
-  const { call, localStream, remoteStream, muted, camOff, acceptCall, rejectCall, endCall, toggleMute, toggleCam } = useRealtime()
+  const {
+    call, localStream, remoteStream, muted, camOff,
+    acceptCall, rejectCall, endCall, dismissCall, toggleMute, toggleCam,
+  } = useRealtime()
   const localRef = useRef(null)
   const remoteRef = useRef(null)
   const [seconds, setSeconds] = useState(0)
@@ -12,13 +15,17 @@ export default function CallOverlay() {
   useEffect(() => { if (remoteRef.current && remoteStream) remoteRef.current.srcObject = remoteStream }, [remoteStream])
 
   useEffect(() => {
-    if (call?.phase !== 'active') { setSeconds(0); return }
+    if (call?.phase !== 'active') return
     const t = setInterval(() => setSeconds((s) => s + 1), 1000)
     return () => clearInterval(t)
   }, [call?.phase])
 
+  useEffect(() => { if (!call) setSeconds(0) }, [call])
+
   if (!call) return null
+
   const isVideo = call.callType === 'video'
+  const failed = call.phase === 'failed'
   const active = call.phase === 'active'
   const mmss = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 
@@ -26,40 +33,46 @@ export default function CallOverlay() {
     'ringing-out': 'Aranıyor…',
     'ringing-in': `Gelen ${isVideo ? 'görüntülü' : 'sesli'} arama`,
     'connecting': 'Bağlanıyor…',
+    'reconnecting': 'Bağlantı yeniden kuruluyor…',
     'active': mmss,
+    'failed': 'Görüşme sonlandı',
   }[call.phase]
 
   return (
     <div style={overlay}>
-      {/* Remote video fills screen when video + active */}
-      {isVideo && active && (
-        <video ref={remoteRef} autoPlay playsInline style={remoteVideo} />
-      )}
+      {isVideo && active && <video ref={remoteRef} autoPlay playsInline style={remoteVideo} />}
+      {!(isVideo && active) && <div style={ambient(failed ? '#F43F5E' : call.peerColor)} />}
 
-      {/* Ambient gradient when no remote video yet */}
-      {!(isVideo && active) && <div style={ambient(call.peerColor)} />}
-
-      {/* Local PiP */}
-      {isVideo && localStream && (
+      {isVideo && localStream && !failed && (
         <video ref={localRef} autoPlay playsInline muted style={pip(camOff)} />
       )}
-      {/* hidden audio-only remote playback */}
       {!isVideo && <video ref={remoteRef} autoPlay playsInline style={{ display: 'none' }} />}
 
       <div style={topInfo}>
         {!(isVideo && active) && (
-          <div className={call.phase.startsWith('ringing') ? 'pulse' : ''} style={{ borderRadius: '50%', marginBottom: 22 }}>
-            <Avatar name={call.peerName} color={call.peerColor} size={120} />
+          <div className={call.phase.startsWith('ringing') ? 'pulse' : ''} style={{ borderRadius: '50%', marginBottom: 22, position: 'relative' }}>
+            <Avatar name={call.peerName || '?'} color={failed ? '#64748B' : call.peerColor} size={120} />
+            {failed && (
+              <div style={failBadge}><Icon name="phone" size={22} /></div>
+            )}
           </div>
         )}
-        <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-.4px' }}>{call.peerName}</div>
+        {call.peerName && <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-.4px' }}>{call.peerName}</div>}
         <div style={{ marginTop: 8, color: 'var(--text-dim)', fontSize: 15, display: 'flex', alignItems: 'center', gap: 8 }}>
           <Icon name={isVideo ? 'video' : 'phone'} size={16} /> {statusText}
         </div>
+
+        {failed && call.error && (
+          <div style={errorBox}>{call.error}</div>
+        )}
       </div>
 
       <div style={controls}>
-        {call.phase === 'ringing-in' ? (
+        {failed ? (
+          <button className="btn primary" style={{ padding: '15px 40px', borderRadius: 18 }} onClick={dismissCall}>
+            Kapat
+          </button>
+        ) : call.phase === 'ringing-in' ? (
           <>
             <CallBtn color="var(--grad-rose)" onClick={rejectCall} icon="phone" rotate label="Reddet" />
             <CallBtn color="var(--grad-mint)" onClick={acceptCall} icon={isVideo ? 'video' : 'phone'} label="Kabul Et" />
@@ -82,7 +95,7 @@ function CallBtn({ color, onClick, icon, rotate, label }) {
       <button onClick={onClick} style={{ ...bigBtn, background: color, transform: rotate ? 'rotate(135deg)' : 'none' }}>
         <Icon name={icon} size={28} />
       </button>
-      <span style={{ fontSize: 12, color: 'var(--text-dim)', transform: rotate ? 'none' : 'none' }}>{label}</span>
+      <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>{label}</span>
     </div>
   )
 }
@@ -102,3 +115,5 @@ const pip = (off) => ({ position: 'absolute', top: 20, right: 20, width: 104, he
 const topInfo = { position: 'relative', zIndex: 3, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', marginTop: 20 }
 const controls = { position: 'relative', zIndex: 3, display: 'flex', alignItems: 'center', gap: 22 }
 const bigBtn = { width: 70, height: 70, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', boxShadow: '0 10px 30px rgba(0,0,0,.4)' }
+const failBadge = { position: 'absolute', bottom: -4, right: -4, width: 44, height: 44, borderRadius: '50%', background: 'var(--grad-rose)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', transform: 'rotate(135deg)', border: '3px solid #05070d' }
+const errorBox = { marginTop: 20, maxWidth: 320, padding: '13px 16px', borderRadius: 16, background: 'rgba(251,113,133,.12)', border: '1px solid rgba(251,113,133,.28)', color: '#fda4af', fontSize: 13.5, lineHeight: 1.55 }

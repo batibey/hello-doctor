@@ -73,6 +73,34 @@ export ConnectionStrings__Postgres="Host=…;Database=…;Username=…;Password=
 dotnet run --no-launch-profile
 ```
 
+## Sesli/görüntülü görüşme (WebRTC)
+
+Görüşme trafiği doğrudan hasta ile doktor arasında akar; sunucu yalnızca bağlantı kurulumunu (offer/answer/ICE) SignalR üzerinden taşır.
+
+Bazı ağlar doğrudan bağlantıya izin vermez — simetrik NAT, sıkı kurumsal güvenlik duvarları, bazı mobil operatörler. Bu durumda trafiği aktaran bir **TURN** sunucusu gerekir; pratikte görüşmelerin yaklaşık %10-20'si bunu gerektirir.
+
+TURN yapılandırması `frontend/.env.local` içinden gelir (`.env.example` dosyasını kopyalayın):
+
+```bash
+VITE_TURN_URLS=turn:turn.ornek.com:3478,turns:turn.ornek.com:5349
+VITE_TURN_USERNAME=kullanici
+VITE_TURN_CREDENTIAL=sifre
+```
+
+Tanımlanmazsa yalnızca public STUN kullanılır ve doğrudan bağlanamayan kullanıcılar hata mesajı görür. Kendi sunucunuz için [coturn](https://github.com/coturn/coturn), hazır servis için Cloudflare Calls / Twilio / Metered kullanılabilir.
+
+TURN'ün gerçekten çalıştığını doğrulamak için doğrudan bağlantıyı tamamen devre dışı bırakın:
+
+```bash
+VITE_ICE_TRANSPORT_POLICY=relay
+```
+
+Bu ayarla görüşme kurulabiliyorsa TURN doğru yapılandırılmıştır. Üretimde boş bırakın.
+
+### Hata durumları
+
+Bağlantı kurulamadığında arama ekranı sessizce takılmaz; nedeni belirten bir mesaj gösterir: izin reddi, cihaz bulunamaması, yanıt verilmemesi (45 sn), bağlantı zaman aşımı (30 sn) ve ICE başarısızlığı ayrı ayrı ele alınır.
+
 ## Veritabanı
 
 Bağlantı dizesi `backend/appsettings.json` içinde. Konteyner **5433** portunda çalışır (yerel bir Postgres ile çakışmaması için).
@@ -96,5 +124,5 @@ Sorgu desenlerine göre indeksler: `(ConversationId, SentAt)` sohbet açılış�
 ## Bilinen sınırlar
 
 - WebRTC yalnızca `localhost` veya HTTPS üzerinde çalışır. Telefondan LAN IP'siyle test için HTTPS gerekir.
-- STUN sunucusu public Google STUN. Simetrik NAT arkasında bağlantı için TURN sunucusu eklenmelidir.
+- TURN yapılandırılmadıysa doğrudan bağlanamayan kullanıcılar görüşemez (hata mesajı gösterilir).
 - Veritabanı şifresi `appsettings.json` içinde geliştirme değeriyle duruyor; üretimde `ConnectionStrings__Postgres` ile geçersiz kılın.
