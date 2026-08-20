@@ -17,5 +17,27 @@ services:
       timeout: 5s
       retries: 10
 
+  # Yerel ağda TURN denemek için. Varsayılan olarak başlamaz:
+  #   docker compose --profile turn up -d
+  # Yalnızca aynı ağdaki cihazlar için işe yarar; internet üzerinden
+  # görüşme için TURN'ün genel bir IP'den erişilebilir olması gerekir.
+  coturn:
+    image: coturn/coturn
+    container_name: hellodoctor-turn
+    profiles: ["turn"]
+    restart: unless-stopped
+    ports:
+      - "3478:3478/udp"
+      - "49160-49170:49160-49170/udp"
+    # Relay adresini konteyner IP'si (172.17.x) olarak duyurmaması için makinenin
+    # LAN adresi verilmeli, yoksa karşı taraf o adrese ulaşamaz:
+    #   TURN_EXTERNAL_IP=$(ipconfig getifaddr en0) docker compose --profile turn up -d
+    command: >
+      -n --lt-cred-mech --realm=hellodoctor
+      --user=${TURN_USER:-hellodoctor}:${TURN_PASSWORD:-turn_dev_pw}
+      --no-tls --no-dtls --listening-port=3478
+      --min-port=49160 --max-port=49170
+      --external-ip=${TURN_EXTERNAL_IP:-127.0.0.1}
+
 volumes:
   pgdata:

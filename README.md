@@ -79,23 +79,49 @@ Görüşme trafiği doğrudan hasta ile doktor arasında akar; sunucu yalnızca 
 
 Bazı ağlar doğrudan bağlantıya izin vermez — simetrik NAT, sıkı kurumsal güvenlik duvarları, bazı mobil operatörler. Bu durumda trafiği aktaran bir **TURN** sunucusu gerekir; pratikte görüşmelerin yaklaşık %10-20'si bunu gerektirir.
 
-TURN yapılandırması `frontend/.env.local` içinden gelir (`.env.example` dosyasını kopyalayın):
+TURN yapılandırması `frontend/.env.local` içinden gelir (`.env.example` dosyasını kopyalayın). Tanımlanmazsa yalnızca public STUN kullanılır ve doğrudan bağlanamayan kullanıcılar hata mesajı görür.
+
+### Seçenek 1 — Metered (ayda 20 GB ücretsiz)
+
+Kayıt gerekiyor; kayıtsız kullanılan eski `openrelay.metered.ca` ucu kapatılmıştır.
+
+1. [metered.ca](https://www.metered.ca/stun-turn) üzerinden ücretsiz hesap açın
+2. Panelden TURN kullanıcı adı ve şifresini alın
+3. `frontend/.env.local` dosyasına yazın:
 
 ```bash
-VITE_TURN_URLS=turn:turn.ornek.com:3478,turns:turn.ornek.com:5349
-VITE_TURN_USERNAME=kullanici
-VITE_TURN_CREDENTIAL=sifre
+VITE_TURN_URLS=turn:global.relay.metered.ca:80,turn:global.relay.metered.ca:443
+VITE_TURN_USERNAME=panelden-gelen-kullanici
+VITE_TURN_CREDENTIAL=panelden-gelen-sifre
 ```
 
-Tanımlanmazsa yalnızca public STUN kullanılır ve doğrudan bağlanamayan kullanıcılar hata mesajı görür. Kendi sunucunuz için [coturn](https://github.com/coturn/coturn), hazır servis için Cloudflare Calls / Twilio / Metered kullanılabilir.
+### Seçenek 2 — Yerel coturn (ücretsiz, yalnızca LAN)
 
-TURN'ün gerçekten çalıştığını doğrulamak için doğrudan bağlantıyı tamamen devre dışı bırakın:
+Aynı ağdaki iki cihaz arasında test için yeterli; internet üzerinden görüşme için sunucunun genel IP'den erişilebilir olması gerekir.
+
+```bash
+TURN_EXTERNAL_IP=$(ipconfig getifaddr en0) docker compose --profile turn up -d
+```
+
+Kimlik bilgileri varsayılan olarak `hellodoctor` / `turn_dev_pw` (`TURN_USER`, `TURN_PASSWORD` ile değiştirilebilir).
+
+### Doğrulama
+
+Kimlik bilgilerini girdikten sonra gerçekten çalıştığını sınayın:
+
+```bash
+cd frontend && node turn-test.mjs
+```
+
+Sunucuya bir TURN `Allocate` isteği gönderip relay adresi alınabiliyor mu diye bakar. Yanlış şifre `401`, ulaşılamayan adres zaman aşımı verir — böylece tarayıcıda "arama kurulamadı" hatasının TURN'den mi başka bir katmandan mı geldiği belirsiz kalmaz.
+
+Uçtan uca doğrulamak için doğrudan bağlantıyı tamamen kapatın:
 
 ```bash
 VITE_ICE_TRANSPORT_POLICY=relay
 ```
 
-Bu ayarla görüşme kurulabiliyorsa TURN doğru yapılandırılmıştır. Üretimde boş bırakın.
+Bu ayarla görüşme kurulabiliyorsa TURN gerçekten devrededir. Üretimde boş bırakın.
 
 ### Hata durumları
 
