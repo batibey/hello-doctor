@@ -14,6 +14,7 @@ export default function ChatScreen() {
   const [messages, setMessages] = useState([])
   const [text, setText] = useState('')
   const [peerTyping, setPeerTyping] = useState(false)
+  const [sendError, setSendError] = useState(null)
   const scrollRef = useRef(null)
   const typingTimer = useRef(null)
 
@@ -36,12 +37,20 @@ export default function ChatScreen() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, peerTyping])
 
-  const send = () => {
+  const send = async () => {
     const t = text.trim()
     if (!t) return
-    sendMessage(userId, t)
-    sendTyping(userId, false)
+    // Girdi ancak sunucu mesajı kabul ettikten sonra temizlenir; aksi halde
+    // bağlantı kopukken yazılan mesaj hiçbir iz bırakmadan kayboluyordu.
     setText('')
+    setSendError(null)
+    try {
+      await sendMessage(userId, t)
+      sendTyping(userId, false)
+    } catch {
+      setText(t)
+      setSendError('Mesaj gönderilemedi. Bağlantı kurulunca tekrar deneyin.')
+    }
   }
 
   const onType = (v) => {
@@ -94,6 +103,14 @@ export default function ChatScreen() {
           </div>
         )}
       </div>
+
+      {sendError && (
+        <div style={{
+          padding: '9px 16px', fontSize: 12.5, textAlign: 'center',
+          background: 'rgba(251,113,133,.12)', color: '#fda4af',
+          borderTop: '1px solid rgba(251,113,133,.28)',
+        }}>{sendError}</div>
+      )}
 
       {/* Composer */}
       <div className="glass" style={{ display: 'flex', gap: 10, padding: '12px 14px 16px', borderTop: '1px solid var(--border)' }}>

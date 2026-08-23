@@ -31,10 +31,25 @@ export function RealtimeProvider({ children }) {
   const pendingCandidates = useRef([])
   const timeoutRef = useRef(null)
 
-  const invoke = useCallback((method, ...args) => {
-    if (connRef.current?.state === signalR.HubConnectionState.Connected)
-      return connRef.current.invoke(method, ...args)
-    return Promise.resolve()
+  const isConnected = () => connRef.current?.state === signalR.HubConnectionState.Connected
+
+  // Başarısızlığı kullanıcıyı ilgilendiren çağrılar: bağlantı yoksa hata
+  // fırlatır. Sessizce başarılı gibi dönmek mesajın kaybolmasına ya da
+  // aramanın sonsuza kadar "Bağlanıyor…" ekranında asılı kalmasına yol açıyordu.
+  const invoke = useCallback(async (method, ...args) => {
+    if (!isConnected()) {
+      const err = new Error('Sunucu bağlantısı yok.')
+      err.name = 'NotConnectedError'
+      throw err
+    }
+    return connRef.current.invoke(method, ...args)
+  }, [])
+
+  // Kapanış ve tekrar denenebilir sinyaller: bağlantı yoksa yapacak bir şey
+  // yok, hata göstermek kullanıcıya bir fayda sağlamaz.
+  const notify = useCallback((method, ...args) => {
+    if (!isConnected()) return Promise.resolve(false)
+    return connRef.current.invoke(method, ...args).then(() => true, () => false)
   }, [])
 
   // ---------- Teardown ----------
@@ -53,7 +68,7 @@ export function RealtimeProvider({ children }) {
   // Aramayı hata durumuna düşürür. Kullanıcı kapatana kadar ekranda kalır.
   const failCall = useCallback((message, { notifyPeer = true } = {}) => {
     const cur = callRef.current
-    if (cur?.peerId && notifyPeer) invoke('EndCall', cur.peerId)
+    if (cur?.peerId && notifyPeer) notify('EndCall', cur.peerId)
     cleanupMedia()
     setCall({
       phase: 'failed',
@@ -63,7 +78,7 @@ export function RealtimeProvider({ children }) {
       peerColor: cur?.peerColor || '#6366F1',
       callType: cur?.callType || 'voice',
     })
-  }, [invoke, cleanupMedia])
+  }, [notify, cleanupMedia])
 
   const dismissCall = useCallback(() => {
     cleanupMedia()
@@ -91,6 +106,10 @@ export function RealtimeProvider({ children }) {
   }
 
   const mediaErrorMessage = (err, callType) => {
+    // Sunucu bağlantısı yoksa sorun medyada değil; medya mesajı yanıltır.
+    if (err?.name === 'NotConnectedError')
+      return 'Sunucu bağlantısı yok. İnternetinizi kontrol edip tekrar deneyin.'
+
     // Tarayıcılar getUserMedia'yı yalnızca güvenli bağlamda (HTTPS veya localhost) sunar.
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
       return 'Kamera ve mikrofon yalnızca HTTPS üzerinden veya localhost’ta kullanılabilir. Telefondan bağlanıyorsanız HTTPS gerekir.'
@@ -135,7 +154,7 @@ export function RealtimeProvider({ children }) {
     const pc = new RTCPeerConnection(buildRtcConfig())
 
     pc.onicecandidate = (e) => {
-      if (e.candidate) invoke('SendIceCandidate', peerId, e.candidate)
+      if (e.candidate) notify('SendIceCandidate', peerId, e.candidate)
     }
     pc.ontrack = (e) => setRemoteStream(e.streams[0])
 
@@ -162,7 +181,7 @@ export function RealtimeProvider({ children }) {
 
     pcRef.current = pc
     return pc
-  }, [invoke, failCall])
+  }, [notify, failCall])
 
   // ---------- Call actions ----------
   const startCall = useCallback(async (peer, callType) => {
@@ -189,24 +208,24 @@ export function RealtimeProvider({ children }) {
       await invoke('AcceptCall', cur.peerId)
     } catch (err) {
       console.error('acceptCall failed', err)
-      await invoke('RejectCall', cur.peerId)
+      await notify('RejectCall', cur.peerId)
       failCall(mediaErrorMessage(err, cur.callType), { notifyPeer: false })
     }
-  }, [getMedia, invoke, failCall])
+  }, [getMedia, invoke, notify, failCall])
 
   const rejectCall = useCallback(async () => {
     const cur = callRef.current
-    if (cur?.peerId) await invoke('RejectCall', cur.peerId)
+    if (cur?.peerId) await notify('RejectCall', cur.peerId)
     cleanupMedia()
     setCall(null)
-  }, [invoke, cleanupMedia])
+  }, [notify, cleanupMedia])
 
   const endCall = useCallback(async () => {
     const cur = callRef.current
-    if (cur?.peerId) await invoke('EndCall', cur.peerId)
+    if (cur?.peerId) await notify('EndCall', cur.peerId)
     cleanupMedia()
     setCall(null)
-  }, [invoke, cleanupMedia])
+  }, [notify, cleanupMedia])
 
   const toggleMute = useCallback(() => {
     const track = localStreamRef.current?.getAudioTracks()[0]
@@ -237,7 +256,7 @@ export function RealtimeProvider({ children }) {
 
   // ---------- Chat API ----------
   const sendMessage = useCallback((recipientId, text) => invoke('SendMessage', recipientId, text), [invoke])
-  const sendTyping = useCallback((recipientId, isTyping) => invoke('Typing', recipientId, isTyping), [invoke])
+  const sendTyping = useCallback((recipientId, isTyping) => notify('Typing', recipientId, isTyping), [notify])
   const onMessage = useCallback((fn) => { messageHandlers.current.add(fn); return () => messageHandlers.current.delete(fn) }, [])
   const onTyping = useCallback((fn) => { typingHandlers.current.add(fn); return () => typingHandlers.current.delete(fn) }, [])
 
