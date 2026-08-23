@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRealtime } from '../context/RealtimeContext'
 import { Avatar, Icon } from './ui'
 
@@ -7,12 +7,24 @@ export default function CallOverlay() {
     call, localStream, remoteStream, muted, camOff,
     acceptCall, rejectCall, endCall, dismissCall, toggleMute, toggleCam,
   } = useRealtime()
-  const localRef = useRef(null)
-  const remoteRef = useRef(null)
   const [seconds, setSeconds] = useState(0)
 
-  useEffect(() => { if (localRef.current && localStream) localRef.current.srcObject = localStream }, [localStream])
-  useEffect(() => { if (remoteRef.current && remoteStream) remoteRef.current.srcObject = remoteStream }, [remoteStream])
+  // Uzak akış, bağlantı 'active' olmadan önce ontrack ile gelir. srcObject'i
+  // efektle atamak yarış yaratıyordu: eleman o an henüz DOM'da olmadığı için
+  // atama kaçıyor, sonradan eklendiğinde efekt yeniden çalışmıyordu. Ref
+  // callback'i elemanın kendisi hazır olduğunda çalıştığı için sıra önemsiz.
+  const attachRemote = useCallback((node) => {
+    if (!node || !remoteStream || node.srcObject === remoteStream) return
+    node.srcObject = remoteStream
+    // Safari otomatik oynatmayı engelleyebiliyor; sessizce deniyoruz.
+    node.play?.().catch(() => {})
+  }, [remoteStream])
+
+  const attachLocal = useCallback((node) => {
+    if (!node || !localStream || node.srcObject === localStream) return
+    node.srcObject = localStream
+    node.play?.().catch(() => {})
+  }, [localStream])
 
   useEffect(() => {
     if (call?.phase !== 'active') return
@@ -40,13 +52,20 @@ export default function CallOverlay() {
 
   return (
     <div style={overlay}>
-      {isVideo && active && <video ref={remoteRef} autoPlay playsInline style={remoteVideo} />}
+      {/* Tek bir uzak eleman her zaman DOM'da durur: sesli aramada gizli kalır,
+          görüntülüde bağlantı kurulunca görünür olur. Böylece akış hangi anda
+          gelirse gelsin bağlanacak bir eleman hazır bulunur. */}
+      <video
+        ref={attachRemote}
+        autoPlay
+        playsInline
+        style={isVideo && active ? remoteVideo : { display: 'none' }}
+      />
       {!(isVideo && active) && <div style={ambient(failed ? '#F43F5E' : call.peerColor)} />}
 
       {isVideo && localStream && !failed && (
-        <video ref={localRef} autoPlay playsInline muted style={pip(camOff)} />
+        <video ref={attachLocal} autoPlay playsInline muted style={pip(camOff)} />
       )}
-      {!isVideo && <video ref={remoteRef} autoPlay playsInline style={{ display: 'none' }} />}
 
       <div style={topInfo}>
         {!(isVideo && active) && (
