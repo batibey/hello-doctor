@@ -267,6 +267,9 @@ export function RealtimeProvider({ children }) {
     conn.on('CallAccepted', async (fromId) => {
       const cur = callRef.current
       if (!cur || !cur.isCaller) return
+      // Sunucu her olayı kullanıcının tüm bağlantılarına gönderir; ikinci bir
+      // kabul bildirimi gelirse pazarlığı baştan başlatmamalıyız.
+      if (pcRef.current) return
       setCall((c) => c && { ...c, phase: 'connecting' })
       try {
         const pc = createPeer(fromId)
@@ -283,6 +286,8 @@ export function RealtimeProvider({ children }) {
     conn.on('ReceiveOffer', async (fromId, offer) => {
       try {
         const pc = pcRef.current || createPeer(fromId)
+        // Yinelenen teklif: pazarlık zaten ilerlemişse yok say.
+        if (pc.signalingState !== 'stable') return
         localStreamRef.current?.getTracks().forEach((t) => pc.addTrack(t, localStreamRef.current))
         await pc.setRemoteDescription(new RTCSessionDescription(offer))
         for (const c of pendingCandidates.current) await pc.addIceCandidate(new RTCIceCandidate(c))
@@ -299,6 +304,10 @@ export function RealtimeProvider({ children }) {
     conn.on('ReceiveAnswer', async (fromId, answer) => {
       const pc = pcRef.current
       if (!pc) return
+      // Cevap yalnızca kendi teklifimizi beklerken uygulanabilir. Yinelenen bir
+      // cevap 'stable' durumda gelir ve setRemoteDescription hata fırlatır;
+      // sessizce yok saymak görüşmeyi ayakta tutar.
+      if (pc.signalingState !== 'have-local-offer') return
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(answer))
         for (const c of pendingCandidates.current) await pc.addIceCandidate(new RTCIceCandidate(c))
@@ -327,14 +336,28 @@ export function RealtimeProvider({ children }) {
       setCall(null)
     })
 
+    // StrictMode efekti iki kez çalıştırır. start() beklenmeden stop() çağrılırsa
+    // ilk bağlantı temizlikten sonra kurulmayı bitirip hayalet olarak kalır; aynı
+    // sayfada iki bağlantı olunca sunucudan gelen her olay iki kez işlenir ve
+    // ikinci SDP cevabı görüşmeyi düşürür.
+    let cancelled = false
+
     conn.start()
-      .then(() => setConnected(true))
-      .catch((e) => console.error('SignalR connect failed', e))
+      .then(() => {
+        if (cancelled) return conn.stop()
+        setConnected(true)
+      })
+      .catch((e) => { if (!cancelled) console.error('SignalR connect failed', e) })
 
     conn.onreconnected(() => setConnected(true))
     conn.onclose(() => setConnected(false))
 
-    return () => { conn.stop(); connRef.current = null; setConnected(false) }
+    return () => {
+      cancelled = true
+      conn.stop()
+      connRef.current = null
+      setConnected(false)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
