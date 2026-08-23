@@ -71,6 +71,17 @@ export function RealtimeProvider({ children }) {
   }, [cleanupMedia])
 
   // ---------- Media ----------
+  // WhatsApp, Instagram gibi uygulamaların içinde açılan sayfalar iOS'ta
+  // WKWebView'de çalışır ve kameraya hiç erişemez; kullanıcıya izin bile
+  // sorulmaz, doğrudan NotAllowedError döner. Bu durumda "izinlerden açın"
+  // demek yanıltıcı olur — yapılacak tek şey sayfayı Safari'de açmak.
+  const isIosInAppBrowser = () => {
+    const ua = navigator.userAgent
+    if (!/iPhone|iPad|iPod/.test(ua)) return false
+    // Gerçek Safari "Safari/", diğer iOS tarayıcıları kendi ekini taşır.
+    return !/Safari\//.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua)
+  }
+
   const mediaErrorMessage = (err, callType) => {
     // Tarayıcılar getUserMedia'yı yalnızca güvenli bağlamda (HTTPS veya localhost) sunar.
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
@@ -79,7 +90,9 @@ export function RealtimeProvider({ children }) {
     switch (err?.name) {
       case 'NotAllowedError':
       case 'SecurityError':
-        return 'Kamera/mikrofon izni reddedildi. Tarayıcı adres çubuğundaki izin simgesinden açabilirsiniz.'
+        if (isIosInAppBrowser())
+          return 'Bu sayfa bir uygulamanın içinde açıldığı için kameraya erişemiyor. Paylaş simgesine dokunup “Safari’de Aç” deyin.'
+        return 'Kamera/mikrofon izni reddedildi. Tarayıcı ayarlarından bu siteye izin verip sayfayı yenileyin.'
       case 'NotFoundError':
       case 'OverconstrainedError':
         return callType === 'video' ? 'Kamera bulunamadı.' : 'Mikrofon bulunamadı.'
