@@ -2,7 +2,9 @@
 // persistence, and the WebRTC signaling handshake. Run: node hub-test.mjs
 import * as signalR from '@microsoft/signalr'
 
-const API = 'http://localhost:5088'
+// Varsayılan olarak backend'e doğrudan bağlanır. Tünel veya LAN üzerinden
+// sınamak için: HD_API=https://... node hub-test.mjs
+const API = process.env.HD_API || 'http://localhost:5088'
 
 const login = async (email, role) => {
   const r = await fetch(`${API}/api/auth/login`, {
