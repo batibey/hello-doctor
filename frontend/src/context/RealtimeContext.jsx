@@ -70,6 +70,14 @@ export function RealtimeProvider({ children }) {
     setCall(null)
   }, [cleanupMedia])
 
+  // WebRTC kurulum hataları tarayıcıdan tarayıcıya değişiyor ve telefonda
+  // konsola bakmak mümkün olmadığı için sebebi ekrana taşıyoruz.
+  const describeError = (err) => {
+    const name = err?.name || 'Error'
+    const msg = (err?.message || '').slice(0, 120)
+    return msg ? `${name}: ${msg}` : name
+  }
+
   // ---------- Media ----------
   // WhatsApp, Instagram gibi uygulamaların içinde açılan sayfalar iOS'ta
   // WKWebView'de çalışır ve kameraya hiç erişemez; kullanıcıya izin bile
@@ -268,7 +276,7 @@ export function RealtimeProvider({ children }) {
         await invoke('SendOffer', fromId, offer)
       } catch (err) {
         console.error('offer failed', err)
-        failCall('Görüşme başlatılamadı.')
+        failCall(`Görüşme başlatılamadı. (${describeError(err)})`)
       }
     })
 
@@ -284,7 +292,7 @@ export function RealtimeProvider({ children }) {
         await invoke('SendAnswer', fromId, answer)
       } catch (err) {
         console.error('answer failed', err)
-        failCall('Görüşme başlatılamadı.')
+        failCall(`Görüşme başlatılamadı. (${describeError(err)})`)
       }
     })
 
@@ -297,7 +305,7 @@ export function RealtimeProvider({ children }) {
         pendingCandidates.current = []
       } catch (err) {
         console.error('setRemoteDescription failed', err)
-        failCall('Görüşme başlatılamadı.')
+        failCall(`Görüşme başlatılamadı. (${describeError(err)})`)
       }
     })
 
