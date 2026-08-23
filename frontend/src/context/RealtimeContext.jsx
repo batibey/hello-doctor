@@ -92,6 +92,10 @@ export function RealtimeProvider({ children }) {
       case 'SecurityError':
         if (isIosInAppBrowser())
           return 'Bu sayfa bir uygulamanın içinde açıldığı için kameraya erişemiyor. Paylaş simgesine dokunup “Safari’de Aç” deyin.'
+        // iOS'ta izin üç ayrı yerden kapatılmış olabilir ve Safari hiçbirinde
+        // yeniden sormaz; kullanıcıyı doğru menüye yönlendirmezsek çıkmazda kalır.
+        if (/iPhone|iPad|iPod/.test(navigator.userAgent))
+          return 'Kamera/mikrofon izni kapalı. Adres çubuğundaki “ᴀA” simgesine dokunup Web Sitesi Ayarları’ndan izin verin. Orada görünmüyorsa Ayarlar › Safari › Kamera ve Mikrofon’u “Sor” yapın.'
         return 'Kamera/mikrofon izni reddedildi. Tarayıcı ayarlarından bu siteye izin verip sayfayı yenileyin.'
       case 'NotFoundError':
       case 'OverconstrainedError':
