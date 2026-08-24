@@ -134,6 +134,18 @@ export function RealtimeProvider({ children }) {
     }
   }
 
+  // Sunucu aramayı hiç iletemediğinde (CallUser -> { ok: false }) sebebi
+  // doğrudan söylenir; eskiden zil zaman aşımına kadar beklenip herkese
+  // "Yanıt verilmedi." deniyordu.
+  const unreachableMessage = (reason) => {
+    switch (reason) {
+      case 'offline': return 'Kullanıcı şu anda çevrimiçi değil.'
+      case 'busy': return 'Kullanıcı başka bir görüşmede.'
+      case 'self': return 'Kendinizi arayamazsınız.'
+      default: return 'Arama başlatılamadı.'
+    }
+  }
+
   const getMedia = useCallback(async (callType) => {
     if (!navigator.mediaDevices?.getUserMedia) {
       const err = new Error('mediaDevices unavailable')
@@ -192,7 +204,10 @@ export function RealtimeProvider({ children }) {
     })
     try {
       await getMedia(callType)
-      await invoke('CallUser', peer.id, callType)
+      const res = await invoke('CallUser', peer.id, callType)
+      // Karşı taraf çevrimdışı ya da meşguldü: zil hiç çalmadı, beklemenin
+      // anlamı yok.
+      if (!res?.ok) failCall(unreachableMessage(res?.reason), { notifyPeer: false })
     } catch (err) {
       console.error('startCall failed', err)
       failCall(mediaErrorMessage(err, callType), { notifyPeer: false })
@@ -208,14 +223,14 @@ export function RealtimeProvider({ children }) {
       await invoke('AcceptCall', cur.peerId)
     } catch (err) {
       console.error('acceptCall failed', err)
-      await notify('RejectCall', cur.peerId)
+      await notify('RejectCall', cur.peerId, 'error')
       failCall(mediaErrorMessage(err, cur.callType), { notifyPeer: false })
     }
   }, [getMedia, invoke, notify, failCall])
 
   const rejectCall = useCallback(async () => {
     const cur = callRef.current
-    if (cur?.peerId) await notify('RejectCall', cur.peerId)
+    if (cur?.peerId) await notify('RejectCall', cur.peerId, null)
     cleanupMedia()
     setCall(null)
   }, [notify, cleanupMedia])
@@ -275,8 +290,18 @@ export function RealtimeProvider({ children }) {
     conn.on('MessageSent', (m) => messageHandlers.current.forEach((fn) => fn(m)))
     conn.on('Typing', (fromId, isTyping) => typingHandlers.current.forEach((fn) => fn(fromId, isTyping)))
 
+    // Sunucu sinyalleri yalnızca eşleşmiş çiftler arasında iletir; istemci de
+    // gelen her olayın gerçekten görüştüğümüz kişiden geldiğini doğrular. Bu
+    // kontrol olmadan ID'mizi bilen üçüncü bir kullanıcı AcceptCall ile
+    // teklifimizi kendine yönlendirebilir ya da EndCall ile görüşmeyi düşürebilirdi.
+    const fromPeer = (fromId) => !!fromId && callRef.current?.peerId === fromId
+
     conn.on('IncomingCall', (info) => {
-      if (callRef.current) return // meşgul
+      // Meşgulken sessizce yutmak arayanı 45 sn zil sesinde bırakıyordu.
+      if (callRef.current) {
+        notify('RejectCall', info.fromId, 'busy')
+        return
+      }
       setCall({
         phase: 'ringing-in', peerId: info.fromId, peerName: info.fromName,
         peerColor: info.fromColor, callType: info.callType, isCaller: false,
@@ -285,7 +310,7 @@ export function RealtimeProvider({ children }) {
 
     conn.on('CallAccepted', async (fromId) => {
       const cur = callRef.current
-      if (!cur || !cur.isCaller) return
+      if (!cur || !cur.isCaller || cur.peerId !== fromId) return
       // Sunucu her olayı kullanıcının tüm bağlantılarına gönderir; ikinci bir
       // kabul bildirimi gelirse pazarlığı baştan başlatmamalıyız.
       if (pcRef.current) return
@@ -303,6 +328,7 @@ export function RealtimeProvider({ children }) {
     })
 
     conn.on('ReceiveOffer', async (fromId, offer) => {
+      if (!fromPeer(fromId)) return
       try {
         const pc = pcRef.current || createPeer(fromId)
         // Yinelenen teklif: pazarlık zaten ilerlemişse yok say.
@@ -321,6 +347,7 @@ export function RealtimeProvider({ children }) {
     })
 
     conn.on('ReceiveAnswer', async (fromId, answer) => {
+      if (!fromPeer(fromId)) return
       const pc = pcRef.current
       if (!pc) return
       // Cevap yalnızca kendi teklifimizi beklerken uygulanabilir. Yinelenen bir
@@ -338,6 +365,7 @@ export function RealtimeProvider({ children }) {
     })
 
     conn.on('ReceiveIceCandidate', async (fromId, candidate) => {
+      if (!fromPeer(fromId)) return
       const pc = pcRef.current
       try {
         if (pc && pc.remoteDescription) await pc.addIceCandidate(new RTCIceCandidate(candidate))
@@ -347,10 +375,19 @@ export function RealtimeProvider({ children }) {
       }
     })
 
-    conn.on('CallRejected', () => {
-      failCall('Arama reddedildi.', { notifyPeer: false })
+    conn.on('CallRejected', (fromId, reason) => {
+      if (!fromPeer(fromId)) return
+      failCall(
+        reason === 'busy' ? 'Kullanıcı başka bir görüşmede.'
+          : reason === 'error' ? 'Kullanıcı aramayı yanıtlayamadı.'
+            : 'Arama reddedildi.',
+        { notifyPeer: false },
+      )
     })
-    conn.on('CallEnded', () => {
+    conn.on('CallEnded', (fromId) => {
+      if (!fromPeer(fromId)) return
+      // Ekranda bir hata duruyorsa kullanıcı okumadan kapatma.
+      if (callRef.current?.phase === 'failed') return
       cleanupMedia()
       setCall(null)
     })
