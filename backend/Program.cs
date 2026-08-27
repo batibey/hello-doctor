@@ -77,6 +77,12 @@ builder.Services.AddSingleton<PasswordService>();
 builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
 builder.Services.AddScoped<EmailSender>();
 
+builder.Services.Configure<ComplianceOptions>(
+    builder.Configuration.GetSection(ComplianceOptions.SectionName));
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<AuditService>();
+builder.Services.AddHostedService<RetentionService>();
+
 builder.Services.Configure<AppointmentOptions>(
     builder.Configuration.GetSection(AppointmentOptions.SectionName));
 

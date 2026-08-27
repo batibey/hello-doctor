@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using HelloDoctor.Api.Data;
 using HelloDoctor.Api.Models;
+using HelloDoctor.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,7 +14,13 @@ namespace HelloDoctor.Api.Controllers;
 public class MessagesController : ControllerBase
 {
     private readonly AppDbContext _db;
-    public MessagesController(AppDbContext db) => _db = db;
+    private readonly AuditService _audit;
+
+    public MessagesController(AppDbContext db, AuditService audit)
+    {
+        _db = db;
+        _audit = audit;
+    }
 
     private string CurrentUserId => User.FindFirstValue(ClaimTypes.NameIdentifier)!;
 
@@ -116,12 +123,16 @@ public class MessagesController : ControllerBase
             .OrderBy(m => m.SentAt)
             .ToListAsync();
 
+        // Sohbet açılışı sağlık verisine erişimdir; denetim kaydına yazılır.
+        _audit.Record(uid, otherUserId, AuditService.ConversationRead,
+            AppDbContext.ConversationId(uid, otherUserId));
+
         var unread = msgs.Where(m => m.RecipientId == uid && !m.Read).ToList();
-        if (unread.Count > 0)
-        {
-            foreach (var m in unread) m.Read = true;
-            await _db.SaveChangesAsync();
-        }
+        foreach (var m in unread) m.Read = true;
+
+        // Okunmamış mesaj olmasa bile kaydediliyor: denetim kaydı da bu
+        // bağlamda bekliyor ve yazılmadan geçilmemeli.
+        await _db.SaveChangesAsync();
 
         return Ok(msgs.Select(ToDto));
     }

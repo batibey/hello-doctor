@@ -14,6 +14,7 @@ import AppointmentsScreen from './screens/AppointmentsScreen'
 import ConversationsScreen from './screens/ConversationsScreen'
 import ChatScreen from './screens/ChatScreen'
 import ProfileScreen from './screens/ProfileScreen'
+import PrivacyScreen from './screens/PrivacyScreen'
 import DoctorProfileScreen from './screens/DoctorProfileScreen'
 
 function Shell() {
@@ -29,7 +30,7 @@ function Shell() {
   useEffect(() => onMessage(() => loadUnread()), [onMessage])
 
   // Hide bottom nav on chat / booking / call screens
-  const hideNav = pathname.startsWith('/chat/') || pathname.startsWith('/doctor/')
+  const hideNav = pathname.startsWith('/chat/') || pathname.startsWith('/doctor/') || pathname === '/privacy'
 
   return (
     <div className="screen">
@@ -40,6 +41,7 @@ function Shell() {
         <Route path="/chat/:userId" element={<ChatScreen />} />
         <Route path="/doctor/:id" element={<DoctorProfileScreen />} />
         <Route path="/profile" element={<ProfileScreen />} />
+        <Route path="/privacy" element={<PrivacyScreen />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       {!hideNav && <BottomNav unread={unread} />}

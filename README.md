@@ -34,7 +34,7 @@ Migration'lar ve demo verisi backend ilk açılışta otomatik uygulanır.
 
 ## Demo hesaplar
 
-Tüm şifreler `1234`. Anahtar çiftleri sunucuda üretilemediği için (parolayı yalnızca istemci bilir) demo hesaplar anahtarsız tohumlanır; ilk girişte tarayıcı üretip yükler.
+Tüm şifreler `1234`. Demo hekimler doğrulanmış olarak, `hasta@hellodoctor.com` ise yönetici olarak tohumlanır (doğrulama ekranını denemek için). Anahtar çiftleri sunucuda üretilemediği için (parolayı yalnızca istemci bilir) demo hesaplar anahtarsız tohumlanır; ilk girişte tarayıcı üretip yükler.
 
 **Yalnızca `Development` ortamında tohumlanır** — şifreleri burada ve giriş ekranında yazılı olduğu için üretimde oluşturulmaları tüm sistemi açardı. Üretim derlemesinde giriş ekranındaki demo paneli de yer almaz, `/api/auth/demo-accounts` uç noktası `404` döner.
 
@@ -57,6 +57,7 @@ dotnet test backend.Tests  # Birim testleri (sunucu/veritabanı gerekmez)
 cd frontend
 node hub-test.mjs          # SignalR: mesajlaşma + WebRTC sinyalleşme
 node appointment-test.mjs  # Randevu iş kuralları
+node compliance-test.mjs   # Hekim doğrulaması, rıza, denetim kaydı, KVKK hakları
 node scaleout-test.mjs     # İki backend örneği arasında (Redis + 2 örnek gerekir)
 node crypto-test.mjs       # Uçtan uca şifreleme (bağımsız, sunucu gerekmez)
 node turn-test.mjs         # TURN kimlik bilgileri gerçekten çalışıyor mu
@@ -72,6 +73,8 @@ Bunlardan biri özellikle önemli: `AuthVerifier` sözleşmesi iki dilde ayrı a
 
 `scaleout-test.mjs` istemcileri **ayrı** backend örneklerine bağlar ve mesajlaşmanın, varlık bilgisinin, görüşme eşleşmesinin ve sinyal yetkilendirmesinin örnekler arasında çalıştığını doğrular. Kurulumu aşağıda.
 
+`compliance-test.mjs` hekim doğrulamasının hasta temasını gerçekten engellediğini, rıza olmadan kayıt açılamadığını, denetim kaydının tutulduğunu ve KVKK haklarının çalıştığını doğrular.
+
 `crypto-test.mjs` anahtar sarmalamayı, mesaj şifrelemeyi, yabancının çözemediğini ve şifre sıfırlandığında eski mesajların okunamaz hale geldiğini doğrular. Tarayıcı gerekmez — WebCrypto Node 18+ içinde var, uygulamanın kullandığı modülün aynısı çalışır.
 
 ## Yapılandırma
@@ -86,6 +89,12 @@ Ayarlar `backend/appsettings.json` içinde; her biri ortam değişkeniyle geçer
 | `Cors__AllowedOrigins__0`, `__1`… | İzin verilen origin'ler. **Üretimde zorunlu.** |
 | `RateLimit__LoginPerMinute` | IP başına dakikada giriş denemesi (varsayılan 5) |
 | `ConnectionStrings__Redis` | Birden fazla örnek için. Boşken durum süreç belleğinde. |
+| `Compliance__PrivacyNoticeVersion` | Aydınlatma metni sürümü; değişince yeniden onay istenir |
+| `Compliance__HealthDataConsentVersion` | Açık rıza metni sürümü |
+| `Compliance__AccessLogRetentionDays` | Denetim kaydı saklama süresi (varsayılan 730) |
+| `Compliance__MessageRetentionDays` | Mesaj budaması. **0 = kapalı** (varsayılan) |
+| `Compliance__AppointmentRetentionDays` | Randevu budaması. **0 = kapalı** (varsayılan) |
+| `Compliance__EmergencyNumber` | Acil durum uyarısındaki numara (varsayılan 112) |
 | `Https__RedirectToHttps` | HTTP isteklerini HTTPS'e yönlendir (varsayılan açık, Development hariç) |
 | `Https__HttpsPort` | Yönlendirmenin hedef portu (varsayılan 443) |
 | `Https__HstsMaxAgeDays` | HSTS süresi (varsayılan 365) |
@@ -216,6 +225,53 @@ Güvenilecek vekili daraltmak önemli: liste boş bırakılırsa yalnızca loopb
 - **Geçmişe ve çok yakına randevu alınamaz**, çalışma günü ve saati dışına da.
 
 Bunların hepsi sunucuda uygulanıyor; arayüzdeki düğmeler yalnızca izin verilen işlemleri gösteriyor ve reddedilen bir geçiş kullanıcıya sebebiyle bildiriliyor.
+
+## Mevzuat kaynaklı kurallar
+
+Bu bölümdeki kısıtlar teknik tercih değil, düzenleme gereği. Ayrıntılı değerlendirme ve Sağlık Bakanlığı'na iletilecek sorular ayrı bir belgede tutuluyor.
+
+### Hekim doğrulaması
+
+Hekim rolüyle kayıt olmak yetmiyor. Kayıtta **diploma tescil numarası** zorunlu ve hesap `Pending` durumunda açılıyor. Doğrulanana kadar hekim:
+
+- doktor listelerinde görünmez,
+- randevu alamaz,
+- hasta ile mesajlaşamaz ve görüşemez.
+
+Doğrulamayı yalnızca yönetici yapar (`POST /api/admin/doctors/{id}/verify`); yönetici yetkisi kayıt akışıyla elde edilemez, veritabanından verilir. Ret gerekçesi zorunludur.
+
+Kısıt üç katmanda birden uygulanıyor — listeleme filtresi, randevu oluşturma ve hub'daki mesajlaşma/arama. Yalnızca listeden gizlemek yeterli olmazdı: kullanıcı kimliğini bilen biri doğrudan erişebilirdi.
+
+### Aydınlatma ve açık rıza
+
+Sağlık verisi özel nitelikli veri olduğu için aydınlatma metni ve açık rıza onaylanmadan hesap açılamıyor. Onaylar **sürümüyle birlikte** kaydediliyor (`Compliance__PrivacyNoticeVersion`): metin değişirse kullanıcının neyi kabul ettiği belirsiz kalmasın. Rıza `POST /api/privacy/consents/{key}` ile geri alınabilir; eski kayıt silinmez, yenisi eklenir.
+
+### Denetim kaydı
+
+Başkasının sağlık verisine her erişim `AccessLogs` tablosuna yazılır: kim, kimin verisine, ne zaman, hangi işlemle. İstek logundan ayrıdır — o operasyonel ve kısa ömürlü.
+
+**Erişilen içerik kaydedilmez.** Mesajlar uçtan uca şifreli; denetim kaydına düz metin düşürmek bütün tasarımı boşa çıkarırdı. Kendi verisine erişim de kaydedilmez, yoksa kayıt kullanışsız hale gelirdi.
+
+Kullanıcı kendi verisine kimlerin eriştiğini uygulamadan görebilir (Profil → Verilerim).
+
+### KVKK veri sahibi hakları
+
+| Hak | Uç nokta |
+|---|---|
+| Verilerine erişme | `GET /api/privacy/export` |
+| Silme | `POST /api/privacy/delete-account` |
+| Rızayı geri alma | `POST /api/privacy/consents/{key}` |
+| Erişim kaydını görme | `GET /api/admin/access-log` |
+
+Silmede hesap anonimleştirilir ve **şifreleme anahtarı yok edilir**. Mesajlar yabancı anahtarla korunduğu için satır olarak silinemiyor; ama anahtar gidince içerik hiç kimse tarafından çözülemez hale geliyor — içerik fiilen imha oluyor. Bekleyen randevular iptal edilir.
+
+### Acil durum yönlendirmesi
+
+Sohbet ekranının başında, kaydırmadan görülecek yerde 112 uyarısı duruyor. Numara `Compliance__EmergencyNumber` ile değiştirilebilir.
+
+### Saklama süreleri
+
+`RetentionService` günde bir kez süresi dolan kayıtları budar. Varsayılan olarak yalnızca teknik kayıtlara dokunur (denetim kaydı 2 yıl, kullanılmış sıfırlama token'ı 30 gün). **Mesaj ve randevu budaması varsayılan kapalıdır** — tıbbi kaydı erken silmek de mevzuata aykırı olabilir, bu yüzden süre Bakanlık görüşü netleşmeden kendiliğinden işlemez.
 
 ## Uçtan uca şifreleme
 

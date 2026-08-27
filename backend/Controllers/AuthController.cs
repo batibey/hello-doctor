@@ -6,6 +6,7 @@ using HelloDoctor.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace HelloDoctor.Api.Controllers;
 
@@ -17,17 +18,19 @@ public class AuthController : ControllerBase
     private readonly TokenService _tokens;
     private readonly PasswordService _passwords;
     private readonly EmailSender _email;
+    private readonly ComplianceOptions _compliance;
     private readonly ILogger<AuthController> _logger;
 
     private static readonly TimeSpan ResetTokenLifetime = TimeSpan.FromHours(1);
 
     public AuthController(AppDbContext db, TokenService tokens, PasswordService passwords,
-        EmailSender email, ILogger<AuthController> logger)
+        EmailSender email, IOptions<ComplianceOptions> compliance, ILogger<AuthController> logger)
     {
         _db = db;
         _tokens = tokens;
         _passwords = passwords;
         _email = email;
+        _compliance = compliance.Value;
         _logger = logger;
     }
 
@@ -74,6 +77,15 @@ public class AuthController : ControllerBase
             || string.IsNullOrWhiteSpace(req.KeyWrapSalt) || string.IsNullOrWhiteSpace(req.KeyWrapIv))
             return BadRequest(new { message = "Şifreleme anahtarları eksik." });
 
+        // KVKK: aydınlatma ve sağlık verisi açık rızası olmadan hesap açılamaz.
+        if (!req.AcceptedPrivacyNotice || !req.AcceptedHealthDataConsent)
+            return BadRequest(new { message = "Aydınlatma metni ve açık rıza onayı zorunludur." });
+
+        // Hekim kaydında diploma tescil numarası isteniyor; doğrulama yönetici
+        // onayıyla tamamlanıyor (1219 sayılı Kanun).
+        if (role == UserRole.Doctor && string.IsNullOrWhiteSpace(req.MedicalLicenseNumber))
+            return BadRequest(new { message = "Hekim kaydı için diploma tescil numarası zorunludur." });
+
         if (await _db.Users.AnyAsync(u => u.Email.ToLower() == email))
             return Conflict(new { message = "Bu e-posta adresi zaten kayıtlı." });
 
@@ -101,9 +113,28 @@ public class AuthController : ControllerBase
             user.Title = req.Title?.Trim();
             user.Bio = req.Bio?.Trim();
             user.ExperienceYears = req.ExperienceYears ?? 0;
+
+            // Kimse kendini doğrulanmış ilan edemez; onaya düşer.
+            user.MedicalLicenseNumber = req.MedicalLicenseNumber!.Trim();
+            user.Verification = DoctorVerification.Pending;
         }
 
         _db.Users.Add(user);
+
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        foreach (var (key, version) in new[]
+                 {
+                     ("aydinlatma", _compliance.PrivacyNoticeVersion),
+                     ("acik-riza", _compliance.HealthDataConsentVersion),
+                 })
+        {
+            _db.ConsentRecords.Add(new ConsentRecord
+            {
+                UserId = user.Id, DocumentKey = key, DocumentVersion = version,
+                Granted = true, ClientIp = ip,
+            });
+        }
+
         await _db.SaveChangesAsync();
 
         var token = _tokens.CreateToken(user);

@@ -1,7 +1,9 @@
 import { useAuth } from '../context/AuthContext'
+import { useNavigate } from 'react-router-dom'
 import { Avatar, Icon } from '../components/ui'
 
 export default function ProfileScreen() {
+  const nav = useNavigate()
   const { user, logout, isDoctor } = useAuth()
 
   const rows = isDoctor
@@ -45,8 +47,9 @@ export default function ProfileScreen() {
 
         <div className="section-title" style={{ margin: '24px 0 10px' }}>Ayarlar</div>
         <div className="card" style={{ padding: 6 }}>
-          {[['bell', 'Bildirimler'], ['shield', 'Gizlilik ve Güvenlik'], ['heart', 'Sağlık Kayıtları']].map(([icon, label], i) => (
-            <button key={label} className="row" style={{ width: '100%', padding: '13px 12px', borderBottom: i < 2 ? '1px solid var(--border)' : 'none' }}>
+          {[['shield', 'Verilerim ve KVKK', '/privacy'], ['bell', 'Bildirimler', null], ['heart', 'Sağlık Kayıtları', null]].map(([icon, label, to], i) => (
+            <button key={label} className="row" onClick={() => to && nav(to)}
+              style={{ width: '100%', padding: '13px 12px', borderBottom: i < 2 ? '1px solid var(--border)' : 'none' }}>
               <div style={{ width: 38, height: 38, borderRadius: 12, background: 'var(--surface-2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name={icon} size={18} /></div>
               <div style={{ flex: 1, textAlign: 'left' }}>{label}</div>
               <Icon name="back" size={18} style={{ transform: 'rotate(180deg)', color: 'var(--text-faint)' }} />

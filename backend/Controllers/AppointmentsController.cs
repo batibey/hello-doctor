@@ -16,11 +16,13 @@ public class AppointmentsController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly AppointmentRules _rules;
+    private readonly AuditService _audit;
 
-    public AppointmentsController(AppDbContext db, AppointmentRules rules)
+    public AppointmentsController(AppDbContext db, AppointmentRules rules, AuditService audit)
     {
         _db = db;
         _rules = rules;
+        _audit = audit;
     }
 
     private string CurrentUserId => User.FindFirstValue(ClaimTypes.NameIdentifier)!;
@@ -56,6 +58,10 @@ public class AppointmentsController : ControllerBase
         var doctor = await _db.Users.FirstOrDefaultAsync(u => u.Id == req.DoctorId && u.Role == UserRole.Doctor);
         if (doctor is null)
             return BadRequest(new { message = "Doktor bulunamadı." });
+
+        // Doğrulanmamış hekimden randevu alınamaz (1219 sayılı Kanun).
+        if (doctor.Verification != DoctorVerification.Verified)
+            return BadRequest(new { message = "Bu hekimin yetkinlik doğrulaması tamamlanmamış." });
         if (!Enum.TryParse<AppointmentType>(req.Type, true, out var type))
             return BadRequest(new { message = "Geçersiz randevu tipi." });
         if (!DateTime.TryParse(req.ScheduledAt, null,
@@ -106,6 +112,10 @@ public class AppointmentsController : ControllerBase
             return BadRequest(new { message = AppointmentRules.TransitionError(CurrentRole, appt.Status, status) });
 
         appt.Status = status;
+
+        var other = appt.PatientId == CurrentUserId ? appt.DoctorId : appt.PatientId;
+        _audit.Record(CurrentUserId, other, AuditService.AppointmentStatusChanged, appt.Id);
+
         await _db.SaveChangesAsync();
         return Ok(ToDto(appt));
     }

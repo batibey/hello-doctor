@@ -2,6 +2,10 @@ namespace HelloDoctor.Api.Models;
 
 public enum UserRole { Patient, Doctor }
 
+// Hekim yetkinliğinin doğrulanma durumu. Kayıt olurken kimse kendini
+// doğrulanmış ilan edemez; Pending ile başlar ve yalnızca yönetici geçirir.
+public enum DoctorVerification { NotApplicable, Pending, Verified, Rejected }
+
 public class User
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
@@ -19,6 +23,19 @@ public class User
     public int ExperienceYears { get; set; }
     public string? Bio { get; set; }
 
+    // Hekim doğrulaması. Doğrulanmamış hekim hasta listelerinde görünmez,
+    // randevu alamaz ve mesajlaşamaz — 1219 sayılı Kanun uyarınca hekim
+    // olmayan kişinin hasta ile tıbbi ilişki kurmaması gerekiyor.
+    public DoctorVerification Verification { get; set; } = DoctorVerification.NotApplicable;
+    public string? MedicalLicenseNumber { get; set; }   // diploma tescil numarası
+    public DateTime? VerifiedAt { get; set; }
+    public string? VerifiedBy { get; set; }             // onaylayan yöneticinin kullanıcı kimliği
+    public string? VerificationNote { get; set; }       // ret gerekçesi ya da doğrulama kaynağı
+
+    // Yönetici, doğrulama işlemlerini yapabilen hesap. Yalnızca veritabanından
+    // atanır; kayıt akışıyla elde edilemez.
+    public bool IsAdministrator { get; set; }
+
     // Patient-specific
     public int? Age { get; set; }
     public string? BloodType { get; set; }
@@ -34,6 +51,35 @@ public class User
     // Navigation
     public ICollection<Appointment> PatientAppointments { get; set; } = new List<Appointment>();
     public ICollection<Appointment> DoctorAppointments { get; set; } = new List<Appointment>();
+}
+
+// Sağlık verisine kimin ne zaman eriştiğinin kaydı. İstek logundan ayrı:
+// o operasyonel ve kısa ömürlü, bu ise denetim kaydı ve saklanması gerekiyor.
+// Erişilen içerik burada tutulmaz — yalnızca kimin hangi kayda eriştiği.
+public class AccessLog
+{
+    public long Id { get; set; }
+    public string ActorId { get; set; } = "";        // erişen kullanıcı
+    public string SubjectId { get; set; } = "";      // verisine erişilen kişi
+    public string Action { get; set; } = "";         // "conversation.read", "appointment.list" …
+    public string? ResourceId { get; set; }
+    public DateTime At { get; set; } = DateTime.UtcNow;
+    public string? ClientIp { get; set; }
+}
+
+// Aydınlatma metni ve açık rızanın kaydı. Metin sürümlenir: metin değişirse
+// kullanıcının neyi kabul ettiği belirsiz kalmasın.
+public class ConsentRecord
+{
+    public long Id { get; set; }
+    public string UserId { get; set; } = "";
+    public string DocumentKey { get; set; } = "";    // "aydinlatma" | "acik-riza"
+    public string DocumentVersion { get; set; } = "";
+    public bool Granted { get; set; }
+    public DateTime At { get; set; } = DateTime.UtcNow;
+    public string? ClientIp { get; set; }
+
+    public User? User { get; set; }
 }
 
 // Şifre sıfırlama bağlantısındaki token yalnızca e-postada ham haliyle bulunur;
@@ -106,11 +152,12 @@ public record AuthResponse(string Token, UserDto User, KeyBundle Keys);
 
 public record UserDto(string Id, string Email, string FullName, string Role, string AvatarColor,
     string? Specialty, string? Title, double Rating, int ExperienceYears, string? Bio, int? Age,
-    string? BloodType, string? PublicKey);
+    string? BloodType, string? PublicKey, string Verification, bool IsAdministrator);
 
 public record RegisterRequest(string Email, string Password, string FullName, string Role,
     int? Age, string? BloodType, string? Specialty, string? Title, string? Bio, int? ExperienceYears,
-    string PublicKey, string WrappedPrivateKey, string KeyWrapSalt, string KeyWrapIv);
+    string PublicKey, string WrappedPrivateKey, string KeyWrapSalt, string KeyWrapIv,
+    string? MedicalLicenseNumber, bool AcceptedPrivacyNotice, bool AcceptedHealthDataConsent);
 
 public record ForgotPasswordRequest(string Email);
 
@@ -123,3 +170,6 @@ public record CreateAppointmentRequest(string DoctorId, string ScheduledAt, stri
 public record UpdateAppointmentStatusRequest(string Status);
 public record SendMessageRequest(string RecipientId, string Text, bool Encrypted,
     string? Iv, string? KeyForSender, string? KeyForRecipient);
+
+public record VerifyDoctorRequest(string Decision, string? Note);   // "verified" | "rejected"
+public record ConsentStatusDto(string DocumentKey, string Version, bool Granted, string At);

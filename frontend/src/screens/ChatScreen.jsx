@@ -113,6 +113,16 @@ export default function ChatScreen() {
       <div ref={scrollRef} className="screen-scroll no-nav" style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 16 }}>
         <div style={{ textAlign: 'center', margin: '4px 0 10px' }}>
           <span className="pill" style={{ fontSize: 11 }}><Icon name="shield" size={12} /> Uçtan uca güvenli sağlık görüşmesi</span>
+          {/* Uzaktan sağlık hizmeti acil durumların yerini tutmaz; yönlendirme
+              sohbetin başında, kaydırmadan görülecek yerde duruyor. */}
+          <div style={{
+            marginTop: 10, padding: '9px 13px', borderRadius: 12, fontSize: 11.5, lineHeight: 1.5,
+            background: 'rgba(251,113,133,.10)', border: '1px solid rgba(251,113,133,.25)',
+            color: '#fda4af', textAlign: 'left',
+          }}>
+            <b>Acil durumsa beklemeyin.</b> Bu hizmet acil sağlık durumlarının yerini tutmaz —
+            derhal <b>112</b> Acil Çağrı Merkezi&apos;ni arayın.
+          </div>
         </div>
         {messages.map((m) => {
           const mine = m.senderId === user.id

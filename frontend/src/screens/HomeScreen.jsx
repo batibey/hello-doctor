@@ -24,9 +24,27 @@ export default function HomeScreen() {
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Günaydın' : hour < 18 ? 'İyi günler' : 'İyi akşamlar'
 
+  // Doğrulanmamış hekim hastaya ulaşamıyor; bunu gizlemek yerine sebebiyle
+  // birlikte söylüyoruz, yoksa kullanıcı uygulamayı bozuk sanır.
+  const verificationNotice = user?.role === 'Doctor' && user?.verification !== 'Verified' ? (
+    <div className="card fade-up" style={{
+      marginBottom: 16, fontSize: 13, lineHeight: 1.6,
+      background: user.verification === 'Rejected' ? 'rgba(251,113,133,.10)' : 'rgba(245,158,11,.10)',
+      border: `1px solid ${user.verification === 'Rejected' ? 'rgba(251,113,133,.28)' : 'rgba(245,158,11,.28)'}`,
+    }}>
+      <b>{user.verification === 'Rejected' ? 'Doğrulama reddedildi' : 'Doğrulama bekleniyor'}</b>
+      <div className="dim" style={{ marginTop: 5 }}>
+        {user.verification === 'Rejected'
+          ? 'Hesabınız hasta ile eşleşmeye açılmadı. Ayrıntı için bizimle iletişime geçin.'
+          : 'Diploma tescil numaranız kontrol edilene kadar hasta listelerinde görünmüyorsunuz, randevu alamaz ve mesajlaşamazsınız.'}
+      </div>
+    </div>
+  ) : null
+
   return (
     <div className="screen">
       <div className="screen-scroll">
+        {verificationNotice}
         {/* Header */}
         <div className="spread fade-up" style={{ marginBottom: 22 }}>
           <div>

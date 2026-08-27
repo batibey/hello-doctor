@@ -13,7 +13,10 @@ export default function RegisterScreen() {
   const [form, setForm] = useState({
     fullName: '', email: '', password: '', password2: '',
     age: '', bloodType: '', specialty: '', title: '', experienceYears: '',
+    medicalLicenseNumber: '',
   })
+  const [acceptedNotice, setAcceptedNotice] = useState(false)
+  const [acceptedConsent, setAcceptedConsent] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -29,6 +32,10 @@ export default function RegisterScreen() {
       return setError('Şifreler eşleşmiyor.')
     if (!cryptoAvailable())
       return setError('Tarayıcınız şifreleme desteklemiyor. HTTPS üzerinden bağlanın.')
+    if (role === 'Doctor' && !form.medicalLicenseNumber.trim())
+      return setError('Hekim kaydı için diploma tescil numarası zorunludur.')
+    if (!acceptedNotice || !acceptedConsent)
+      return setError('Devam etmek için aydınlatma metnini ve açık rızayı onaylayın.')
 
     setLoading(true)
     try {
@@ -43,6 +50,9 @@ export default function RegisterScreen() {
         title: role === 'Doctor' ? form.title || null : null,
         experienceYears: role === 'Doctor' && form.experienceYears ? Number(form.experienceYears) : null,
         bio: null,
+        medicalLicenseNumber: role === 'Doctor' ? form.medicalLicenseNumber.trim() : null,
+        acceptedPrivacyNotice: acceptedNotice,
+        acceptedHealthDataConsent: acceptedConsent,
       })
       nav('/', { replace: true })
     } catch (err) {
@@ -85,6 +95,12 @@ export default function RegisterScreen() {
             </div>
           ) : (
             <>
+              <input className="input" placeholder="Diploma tescil numarası" value={form.medicalLicenseNumber} onChange={set('medicalLicenseNumber')} required />
+              <div className="card" style={{ fontSize: 12, lineHeight: 1.6 }}>
+                <Icon name="shield" size={13} /> Hekim hesapları <b>doğrulanana kadar</b> hasta
+                listelerinde görünmez, randevu alamaz ve mesajlaşamaz. Tescil numaranız
+                kontrol edildikten sonra hesabınız etkinleşir.
+              </div>
               <input className="input" placeholder="Uzmanlık (ör. Kardiyoloji)" value={form.specialty} onChange={set('specialty')} />
               <div style={{ display: 'flex', gap: 12 }}>
                 <input className="input" placeholder="Unvan" value={form.title} onChange={set('title')} style={{ flex: 1 }} />
@@ -96,6 +112,19 @@ export default function RegisterScreen() {
           <div className="card" style={{ fontSize: 12, lineHeight: 1.6 }}>
             <Icon name="shield" size={13} /> Şifreniz mesaj anahtarınızı da korur. Şifrenizi
             sıfırlarsanız yeni bir anahtar oluşturulur ve <b>eski mesajlarınız okunamaz hale gelir</b>.
+          </div>
+
+          {/* KVKK: sağlık verisi özel nitelikli veri; aydınlatma ve açık rıza
+              olmadan hesap açılamaz. Onaylar sunucuda sürümüyle kaydediliyor. */}
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12.5, lineHeight: 1.55 }}>
+            <label style={{ display: 'flex', gap: 9, alignItems: 'flex-start', cursor: 'pointer' }}>
+              <input type="checkbox" checked={acceptedNotice} onChange={(e) => setAcceptedNotice(e.target.checked)} style={{ marginTop: 3 }} />
+              <span><b>Aydınlatma metnini</b> okudum. Kişisel verilerimin hangi amaçla işlendiğini anladım.</span>
+            </label>
+            <label style={{ display: 'flex', gap: 9, alignItems: 'flex-start', cursor: 'pointer' }}>
+              <input type="checkbox" checked={acceptedConsent} onChange={(e) => setAcceptedConsent(e.target.checked)} style={{ marginTop: 3 }} />
+              <span><b>Sağlık verilerimin işlenmesine</b> açık rıza veriyorum. Bu rızayı dilediğim zaman geri alabileceğimi biliyorum.</span>
+            </label>
           </div>
 
           {error && <div className="pill rose" style={{ justifyContent: 'center' }}>{error}</div>}

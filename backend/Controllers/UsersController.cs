@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using HelloDoctor.Api.Data;
 using HelloDoctor.Api.Models;
+using HelloDoctor.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,7 +14,13 @@ namespace HelloDoctor.Api.Controllers;
 public class UsersController : ControllerBase
 {
     private readonly AppDbContext _db;
-    public UsersController(AppDbContext db) => _db = db;
+    private readonly AuditService _audit;
+
+    public UsersController(AppDbContext db, AuditService audit)
+    {
+        _db = db;
+        _audit = audit;
+    }
 
     private string CurrentUserId => User.FindFirstValue(ClaimTypes.NameIdentifier)!;
 
@@ -56,7 +63,11 @@ public class UsersController : ControllerBase
     [HttpGet("doctors")]
     public async Task<IActionResult> Doctors([FromQuery] string? q)
     {
-        var query = _db.Users.AsNoTracking().Where(u => u.Role == UserRole.Doctor);
+        // Yalnızca doğrulanmış hekimler listelenir. Doğrulanmamış bir hesabın
+        // hasta karşısına hekim olarak çıkması 1219 sayılı Kanun bakımından
+        // sakıncalı; listede görünmemesi ilk savunma hattı.
+        var query = _db.Users.AsNoTracking()
+            .Where(u => u.Role == UserRole.Doctor && u.Verification == DoctorVerification.Verified);
 
         if (!string.IsNullOrWhiteSpace(q))
         {
@@ -75,6 +86,10 @@ public class UsersController : ControllerBase
     {
         var u = await _db.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id);
         if (u is null) return NotFound();
+
+        _audit.Record(CurrentUserId, id, AuditService.ProfileRead);
+        await _audit.SaveAsync();
+
         return Ok(u.ToDto());
     }
 }

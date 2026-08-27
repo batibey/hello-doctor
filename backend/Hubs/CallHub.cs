@@ -69,7 +69,9 @@ public class CallHub : Hub
         ChatMessage msg;
         await using (var db = await _dbFactory.CreateDbContextAsync())
         {
-            if (!await db.Users.AnyAsync(u => u.Id == recipientId)) return;
+            // Doğrulanmamış hekim hastayla mesajlaşamaz; doğrulama listede
+            // görünmemekle bitmiyor, doğrudan kimlikle erişim de kapalı olmalı.
+            if (!await CanInteractAsync(db, uid, recipientId)) return;
 
             msg = new ChatMessage
             {
@@ -109,8 +111,22 @@ public class CallHub : Hub
     private async Task<bool> ArePairedAsync(string a, string b) =>
         await _state.GetPeerAsync(a) == b;
 
+    // Doğrulanmamış hekimin hasta ile tıbbi ilişki kurmaması gerekiyor
+    // (1219 sayılı Kanun). Her iki taraf da uygun olmalı.
+    private static async Task<bool> CanInteractAsync(AppDbContext db, string a, string b)
+    {
+        var users = await db.Users.AsNoTracking()
+            .Where(u => u.Id == a || u.Id == b)
+            .Select(u => new { u.Id, u.Role, u.Verification })
+            .ToListAsync();
+
+        if (users.Count != 2) return false;
+        return users.All(u => u.Role != UserRole.Doctor
+                              || u.Verification == DoctorVerification.Verified);
+    }
+
     // callType: "voice" | "video"
-    // Dönüş: { ok, reason } — reason: "self" | "offline" | "busy".
+    // Dönüş: { ok, reason } — reason: "self" | "offline" | "busy" | "unverified".
     // Ulaşılamayan hedefte sessizce başarılı dönmek, arayanı 45 saniyelik zil
     // zaman aşımına kadar boşuna bekletiyordu.
     public async Task<object> CallUser(string targetId, string callType)
@@ -118,6 +134,11 @@ public class CallHub : Hub
         var uid = Uid;
         if (targetId == uid)
             return new { ok = false, reason = "self" };
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        if (!await CanInteractAsync(db, uid, targetId))
+            return new { ok = false, reason = "unverified" };
+
         if (!await _state.IsOnlineAsync(targetId))
             return new { ok = false, reason = "offline" };
 
@@ -128,7 +149,6 @@ public class CallHub : Hub
 
         await _state.SetPeerAsync(uid, targetId);
 
-        await using var db = await _dbFactory.CreateDbContextAsync();
         var caller = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == uid);
 
         await Clients.User(targetId).SendAsync("IncomingCall", new
