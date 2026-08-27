@@ -33,8 +33,12 @@ public static class DbInitializer
         if (await db.Users.AnyAsync())
             return;
 
+        // İstemci ham parolayı değil türevini gönderdiği için tohumlama da aynı
+        // türevi hash'lemeli. Anahtar alanları boş bırakılıyor: özel anahtarı
+        // sarmalayacak parola yalnızca istemcide bilindiğinden, çift ilk girişte
+        // istemcide üretilip yüklenir (POST /api/users/keys).
         const string demoPassword = "1234";
-        string H() => hasher.Hash(demoPassword);
+        string H() => hasher.Hash(AuthVerifier.Derive(demoPassword));
 
         var doctors = new[]
         {

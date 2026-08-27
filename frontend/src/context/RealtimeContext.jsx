@@ -270,7 +270,13 @@ export function RealtimeProvider({ children }) {
   }, [call, failCall])
 
   // ---------- Chat API ----------
-  const sendMessage = useCallback((recipientId, text) => invoke('SendMessage', recipientId, text), [invoke])
+  // payload, şifrelenmiş mesaj alanlarını taşır (bkz. crypto/keys.js).
+  // Şifrelenmemiş gönderim yalnızca karşı tarafın açık anahtarı yoksa olur.
+  const sendMessage = useCallback(
+    (recipientId, payload) => invoke('SendMessage', recipientId,
+      payload.text, !!payload.encrypted,
+      payload.iv ?? null, payload.keyForSender ?? null, payload.keyForRecipient ?? null),
+    [invoke])
   const sendTyping = useCallback((recipientId, isTyping) => notify('Typing', recipientId, isTyping), [notify])
   const onMessage = useCallback((fn) => { messageHandlers.current.add(fn); return () => messageHandlers.current.delete(fn) }, [])
   const onTyping = useCallback((fn) => { typingHandlers.current.add(fn); return () => typingHandlers.current.delete(fn) }, [])

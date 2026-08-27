@@ -71,7 +71,10 @@ public class CallHub : Hub
     }
 
     // ---- Chat ----
-    public async Task SendMessage(string recipientId, string text)
+    // text şifreliyse base64 AES-GCM çıktısıdır; sunucu içeriğini göremez,
+    // yalnızca taşır ve saklar.
+    public async Task SendMessage(string recipientId, string text, bool encrypted,
+        string? iv, string? keyForSender, string? keyForRecipient)
     {
         var uid = Uid;
         if (string.IsNullOrWhiteSpace(text)) return;
@@ -87,6 +90,10 @@ public class CallHub : Hub
                 SenderId = uid,
                 RecipientId = recipientId,
                 Text = text,
+                Encrypted = encrypted,
+                Iv = iv,
+                KeyForSender = keyForSender,
+                KeyForRecipient = keyForRecipient,
             };
             db.Messages.Add(msg);
             await db.SaveChangesAsync();
@@ -95,7 +102,9 @@ public class CallHub : Hub
         var payload = new
         {
             id = msg.Id, senderId = msg.SenderId, recipientId = msg.RecipientId,
-            text = msg.Text, sentAt = msg.SentAt.ToString("o"), read = false
+            text = msg.Text, sentAt = msg.SentAt.ToString("o"), read = false,
+            encrypted = msg.Encrypted, iv = msg.Iv,
+            keyForSender = msg.KeyForSender, keyForRecipient = msg.KeyForRecipient
         };
         await Clients.Clients(ConnectionsOf(recipientId)).SendAsync("ReceiveMessage", payload);
         await Clients.Caller.SendAsync("MessageSent", payload);

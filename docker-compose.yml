@@ -17,6 +17,17 @@ services:
       timeout: 5s
       retries: 10
 
+  # Yerel SMTP yakalayıcı: şifre sıfırlama e-postaları gerçekten gönderilir ama
+  # dışarı çıkmaz, http://localhost:8025 arayüzünde görünür. Gerçek bir SMTP
+  # sağlayıcısına Smtp__* ortam değişkenleriyle geçilir.
+  mailpit:
+    image: axllent/mailpit
+    container_name: hellodoctor-mail
+    restart: unless-stopped
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # web arayüzü
+
   # Yerel ağda TURN denemek için. Varsayılan olarak başlamaz:
   #   docker compose --profile turn up -d
   # Yalnızca aynı ağdaki cihazlar için işe yarar; internet üzerinden

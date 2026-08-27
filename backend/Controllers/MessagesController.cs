@@ -17,12 +17,19 @@ public class MessagesController : ControllerBase
 
     private string CurrentUserId => User.FindFirstValue(ClaimTypes.NameIdentifier)!;
 
-    public record MessageDto(string Id, string SenderId, string RecipientId, string Text, string SentAt, bool Read);
+    // Sunucu şifreli metni çözemez; şifre çözme için gereken malzemeyi olduğu
+    // gibi taşır ve istemci açar.
+    public record MessageDto(string Id, string SenderId, string RecipientId, string Text,
+        string SentAt, bool Read, bool Encrypted, string? Iv, string? KeyForSender, string? KeyForRecipient);
+
+    // LastMessage da şifreli gelebildiği için önizleme sunucuda üretilemez;
+    // sohbet listesindeki son mesaj istemcide çözülür.
     public record ConversationDto(string UserId, string FullName, string Role, string AvatarColor,
-        string? Specialty, string LastMessage, string LastAt, int Unread);
+        string? Specialty, MessageDto LastMessage, string LastAt, int Unread);
 
     private static MessageDto ToDto(ChatMessage m) =>
-        new(m.Id, m.SenderId, m.RecipientId, m.Text, m.SentAt.ToString("o"), m.Read);
+        new(m.Id, m.SenderId, m.RecipientId, m.Text, m.SentAt.ToString("o"), m.Read,
+            m.Encrypted, m.Iv, m.KeyForSender, m.KeyForRecipient);
 
     [HttpGet("conversations")]
     public async Task<IActionResult> Conversations()
@@ -53,7 +60,7 @@ public class MessagesController : ControllerBase
                 return new ConversationDto(
                     g.Key, p?.FullName ?? "?", p?.Role.ToString() ?? "",
                     p?.AvatarColor ?? "#4F46E5", p?.Specialty,
-                    last.Text, last.SentAt.ToString("o"),
+                    ToDto(last), last.SentAt.ToString("o"),
                     g.Count(m => m.RecipientId == uid && !m.Read));
             })
             .OrderByDescending(c => c.LastAt)
@@ -96,6 +103,10 @@ public class MessagesController : ControllerBase
             SenderId = uid,
             RecipientId = req.RecipientId,
             Text = req.Text,
+            Encrypted = req.Encrypted,
+            Iv = req.Iv,
+            KeyForSender = req.KeyForSender,
+            KeyForRecipient = req.KeyForRecipient,
         };
         _db.Messages.Add(msg);
         await _db.SaveChangesAsync();

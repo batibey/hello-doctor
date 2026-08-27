@@ -12,13 +12,15 @@ Hasta ve doktorları buluşturan mobil sağlık uygulaması: randevu, gerçek za
 | Gerçek zamanlı | SignalR |
 | Sesli/görüntülü | WebRTC (SignalR üzerinden sinyalleşme) |
 | Kimlik doğrulama | JWT, PBKDF2 ile hash'lenmiş şifreler |
+| Mesaj şifreleme | Uçtan uca: RSA-OAEP 2048 + AES-GCM 256 (WebCrypto) |
+| E-posta | MailKit üzerinden SMTP (şifre sıfırlama) |
 
 ## Çalıştırma
 
 Üç servis gerekiyor. Sırayla:
 
 ```bash
-# 1. Veritabanı
+# 1. Veritabanı + yerel e-posta yakalayıcı (Mailpit: http://localhost:8025)
 docker compose up -d
 
 # 2. Backend  → http://localhost:5088
@@ -32,7 +34,9 @@ Migration'lar ve demo verisi backend ilk açılışta otomatik uygulanır.
 
 ## Demo hesaplar
 
-Tüm şifreler `1234`. **Yalnızca `Development` ortamında tohumlanır** — şifreleri burada ve giriş ekranında yazılı olduğu için üretimde oluşturulmaları tüm sistemi açardı. Üretim derlemesinde giriş ekranındaki demo paneli de yer almaz, `/api/auth/demo-accounts` uç noktası `404` döner.
+Tüm şifreler `1234`. Anahtar çiftleri sunucuda üretilemediği için (parolayı yalnızca istemci bilir) demo hesaplar anahtarsız tohumlanır; ilk girişte tarayıcı üretip yükler.
+
+**Yalnızca `Development` ortamında tohumlanır** — şifreleri burada ve giriş ekranında yazılı olduğu için üretimde oluşturulmaları tüm sistemi açardı. Üretim derlemesinde giriş ekranındaki demo paneli de yer almaz, `/api/auth/demo-accounts` uç noktası `404` döner.
 
 | Rol | E-posta |
 |---|---|
@@ -48,10 +52,15 @@ Mesajlaşma ve aramayı denemek için iki oturum açın: normal pencerede hasta,
 ## Testler
 
 ```bash
-cd frontend && node hub-test.mjs
+cd frontend
+node hub-test.mjs      # SignalR: mesajlaşma + WebRTC sinyalleşme (backend çalışıyor olmalı)
+node crypto-test.mjs   # Uçtan uca şifreleme (bağımsız, sunucu gerekmez)
+node turn-test.mjs     # TURN kimlik bilgileri gerçekten çalışıyor mu
 ```
 
-SignalR üzerinden mesaj iletimi, veritabanına yazım, yazıyor göstergesi ve WebRTC sinyalleşme el sıkışmasını uçtan uca doğrular.
+`hub-test.mjs` mesaj iletimini, veritabanına yazımı, yazıyor göstergesini, WebRTC el sıkışmasını ve görüşmenin taraflarına ait olmayan sinyallerin reddedildiğini doğrular.
+
+`crypto-test.mjs` anahtar sarmalamayı, mesaj şifrelemeyi, yabancının çözemediğini ve şifre sıfırlandığında eski mesajların okunamaz hale geldiğini doğrular. Tarayıcı gerekmez — WebCrypto Node 18+ içinde var, uygulamanın kullandığı modülün aynısı çalışır.
 
 ## Yapılandırma
 
@@ -64,6 +73,10 @@ Ayarlar `backend/appsettings.json` içinde; her biri ortam değişkeniyle geçer
 | `ConnectionStrings__Postgres` | Veritabanı bağlantı dizesi |
 | `Cors__AllowedOrigins__0`, `__1`… | İzin verilen origin'ler. **Üretimde zorunlu.** |
 | `RateLimit__LoginPerMinute` | IP başına dakikada giriş denemesi (varsayılan 5) |
+| `Smtp__Host`, `Smtp__Port` | Şifre sıfırlama e-postası için SMTP sunucusu |
+| `Smtp__User`, `Smtp__Password` | SMTP kimlik bilgileri (gerekiyorsa) |
+| `Smtp__FromAddress` | Gönderen adresi |
+| `Smtp__AppBaseUrl` | Sıfırlama bağlantısının işaret ettiği ön yüz adresi |
 
 Geliştirmede anahtar `appsettings.Development.json` içinden gelir, ek kurulum gerekmez. Bu değer yalnızca yereldir ve üretimde kullanılmamalıdır.
 
@@ -77,6 +90,34 @@ export ConnectionStrings__Postgres="Host=…;Database=…;Username=…;Password=
 export Cors__AllowedOrigins__0="https://hellodoctor.example"
 dotnet run --no-launch-profile
 ```
+
+## Hesap akışları
+
+Kayıt (`/register`), şifremi unuttum (`/forgot-password`) ve sıfırlama (`/reset-password?token=…`) ekranları giriş ekranından bağlantılı.
+
+Sıfırlama token'ı 1 saat geçerli, tek kullanımlık ve veritabanında yalnızca hash'i tutuluyor — veritabanı sızsa bile bağlantılar kullanılamaz. Yeni bir istek, bekleyen eski token'ları geçersiz kılıyor. `forgot-password` adresin kayıtlı olup olmadığına bakmaksızın aynı yanıtı veriyor; aksi halde bu uç nokta kimlerin üye olduğunu öğrenmek için kullanılabilirdi.
+
+Geliştirmede e-postalar `docker compose` ile gelen **Mailpit**'e düşer: <http://localhost:8025>. Gerçek gönderim için `Smtp__*` değişkenlerini doldurun.
+
+## Uçtan uca şifreleme
+
+Mesajlar cihazda şifrelenir; **sunucu içeriği okuyamaz.** Sohbet ekranındaki "uçtan uca güvenli" ifadesi bu yüzden doğrudur.
+
+Nasıl çalışıyor:
+
+- Her kullanıcının RSA-OAEP 2048 anahtar çifti var. Açık anahtar sunucuda herkese açık durur.
+- Özel anahtar, kullanıcının parolasından PBKDF2 (210.000 tur) ile türetilen bir AES-GCM anahtarıyla **sarmalanmış** olarak saklanır. Sunucu sarmalıyı görür ama açamaz.
+- Her mesaj rastgele bir AES-GCM anahtarıyla şifrelenir; o anahtar hem alıcının hem gönderenin açık anahtarıyla ayrı ayrı şifrelenir, böylece gönderen de kendi yazdığını okuyabilir.
+- Cihazda özel anahtar IndexedDB'de `extractable: false` olarak durur — sayfada XSS olsa bile dışarı çıkarılamaz, yalnızca kullanılabilir.
+
+**Ham parola sunucuya hiç gitmez.** İstemci kimlik doğrulama için parolanın ayrı bir türevini gönderir (`frontend/src/crypto/keys.js` → `authVerifier`, karşılığı `backend/Services/AuthVerifier.cs`). Sunucu ham parolayı görseydi aynı sarmalama anahtarını türetip özel anahtarı açabilir, "sunucu okuyamaz" iddiası anlamını yitirirdi. İki taraf birebir aynı dizeyi üretmeli.
+
+### Sonuçları
+
+- **Şifre sıfırlamak eski mesajları okunamaz hale getirir.** Eski parola bilinmediği için eski özel anahtar açılamaz; sıfırlamada yeni bir çift üretilir. Kullanıcı bu konuda kayıt ekranında, sıfırlama ekranında ve e-postada uyarılıyor. Açılamayan mesajlar sohbette bunu belirten bir metinle görünür.
+- **Sohbet listesindeki son mesaj önizlemesi sunucuda üretilemez**, istemcide çözülür.
+- **Karşı tarafın açık anahtarı yoksa mesaj gönderilemez.** Sessizce düz metne düşmek yerine engelleniyor; kullanıcı şifreli sandığı bir mesajı açıkta göndermesin.
+- Şifreleme öncesi yazılmış mesajlar düz metin olarak durur ve öyle görünür (`Encrypted = false`).
 
 ## Sesli/görüntülü görüşme (WebRTC)
 
@@ -168,8 +209,6 @@ Sorgu desenlerine göre indeksler: `(ConversationId, SentAt)` sohbet açılış�
 
 Bu proje henüz üretime hazır değil. Kapatılmamış maddeler:
 
-- **Kayıt ve şifre sıfırlama akışı yok.** Gerçek bir kullanıcının hesap açma yolu bulunmuyor.
-- **Sohbet ekranındaki "uçtan uca güvenli" ifadesi doğru değil.** Mesajlar sunucuya ve veritabanına düz metin yazılıyor. Sağlık verisi için ya ifade düzeltilmeli ya da iddia karşılanmalı (KVKK).
 - **TURN kimlik bilgileri derlenmiş pakete gömülü.** Süreleri dolunca görüşmeler sessizce bozulur ve kullanıcıya yanlış sebep gösterilir; ayrıca kota herkese açık. Çözüm: kimlik bilgilerini backend'den çalışma anında veren bir uç nokta.
 - **Randevu iş kuralları eksik.** Hasta kendi randevusunu onaylayabiliyor, geçmişe randevu alınabiliyor, çakışma kontrolü yok.
 - **HTTPS zorlaması ve HSTS yok.** Yapılandırılmış log, health check ve yedekleme planı da yok.

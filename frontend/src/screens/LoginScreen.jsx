@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Icon } from '../components/ui'
 
@@ -66,6 +67,11 @@ export default function LoginScreen() {
             {loading ? <div className="spinner" /> : <>{role === 'Doctor' ? 'Doktor Girişi' : 'Hasta Girişi'} <Icon name="back" size={18} style={{ transform: 'rotate(180deg)' }} /></>}
           </button>
         </form>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 16, fontSize: 13 }}>
+          <Link to="/forgot-password" className="dim" style={{ fontWeight: 600 }}>Şifremi unuttum</Link>
+          <Link to="/register" style={{ color: 'var(--brand)', fontWeight: 600 }}>Hesap oluştur</Link>
+        </div>
 
         {IS_DEV && (
           <>

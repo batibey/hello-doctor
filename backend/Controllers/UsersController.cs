@@ -25,6 +25,34 @@ public class UsersController : ControllerBase
         return Ok(u.ToDto());
     }
 
+    // İlk girişte istemci kendi anahtar çiftini üretip yükler. Sunucu ham
+    // parolayı bilmediği için sarmalamayı kendisi yapamaz.
+    //
+    // Yalnızca bir kez yazılır: var olan anahtarın üzerine yazmak, o anahtarla
+    // şifrelenmiş tüm geçmişi okunamaz hale getirirdi. Anahtar değişimi
+    // yalnızca şifre sıfırlama akışından geçer.
+    [HttpPost("keys")]
+    public async Task<IActionResult> SetKeys([FromBody] KeyBundle req)
+    {
+        if (string.IsNullOrWhiteSpace(req.PublicKey) || string.IsNullOrWhiteSpace(req.WrappedPrivateKey)
+            || string.IsNullOrWhiteSpace(req.KeyWrapSalt) || string.IsNullOrWhiteSpace(req.KeyWrapIv))
+            return BadRequest(new { message = "Anahtar malzemesi eksik." });
+
+        var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == CurrentUserId);
+        if (u is null) return NotFound();
+
+        if (!string.IsNullOrEmpty(u.PublicKey))
+            return Conflict(new { message = "Bu hesapta zaten bir anahtar var." });
+
+        u.PublicKey = req.PublicKey;
+        u.WrappedPrivateKey = req.WrappedPrivateKey;
+        u.KeyWrapSalt = req.KeyWrapSalt;
+        u.KeyWrapIv = req.KeyWrapIv;
+        await _db.SaveChangesAsync();
+
+        return Ok(u.ToKeyBundle());
+    }
+
     [HttpGet("doctors")]
     public async Task<IActionResult> Doctors([FromQuery] string? q)
     {

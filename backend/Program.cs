@@ -35,6 +35,9 @@ builder.Services.Configure<JwtOptions>(jwtSection);
 builder.Services.AddSingleton<TokenService>();
 builder.Services.AddSingleton<PasswordService>();
 
+builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
+builder.Services.AddScoped<EmailSender>();
+
 // Her origin'e açık bir politika AllowCredentials ile birleşince, herhangi bir
 // sitenin kullanıcının tarayıcısı üzerinden kimlikli istek atmasına izin verir.
 // Üretimde origin listesi açıkça verilmeli; verilmezse uygulama açılmaz.

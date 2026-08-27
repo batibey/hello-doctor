@@ -1,24 +1,40 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useRealtime } from '../context/RealtimeContext'
 import { Avatar, Icon, Loader, timeAgo } from '../components/ui'
+import { decryptMessage } from '../crypto/keys'
 
 export default function ConversationsScreen() {
   const nav = useNavigate()
-  const { isDoctor } = useAuth()
+  const { isDoctor, user, privateKey } = useAuth()
   const { onMessage } = useRealtime()
   const [convs, setConvs] = useState(null)
   const [doctors, setDoctors] = useState([])
 
-  const load = () => api.get('/messages/conversations').then(({ data }) => setConvs(data)).catch(() => setConvs([]))
+  // Son mesaj önizlemesi de şifreli geliyor; sunucu çözemediği için burada
+  // çözülüp listeye yazılıyor.
+  const load = useCallback(async () => {
+    try {
+      const { data } = await api.get('/messages/conversations')
+      const withPreview = await Promise.all(data.map(async (c) => ({
+        ...c,
+        preview: await decryptMessage(
+          c.lastMessage, privateKey, c.lastMessage.senderId === user.id),
+      })))
+      setConvs(withPreview)
+    } catch {
+      setConvs([])
+    }
+  }, [privateKey, user.id])
+
   useEffect(() => {
     load()
     if (!isDoctor) api.get('/users/doctors').then(({ data }) => setDoctors(data)).catch(() => {})
     const off = onMessage(() => load())
     return off
-  }, [isDoctor, onMessage])
+  }, [isDoctor, onMessage, load])
 
   return (
     <div className="screen">
@@ -56,7 +72,9 @@ export default function ConversationsScreen() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="spread"><span style={{ fontWeight: 700, fontSize: 15 }}>{c.fullName}</span><span className="faint" style={{ fontSize: 11.5 }}>{timeAgo(c.lastAt)}</span></div>
                   <div className="spread" style={{ marginTop: 3 }}>
-                    <span className="dim" style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 220 }}>{c.lastMessage}</span>
+                    <span className="dim" style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 220, fontStyle: c.preview === null ? 'italic' : 'normal' }}>
+                      {c.preview === null ? 'Şifreli mesaj' : c.preview}
+                    </span>
                     {c.unread > 0 && <span className="nav-badge" style={{ position: 'static' }}>{c.unread}</span>}
                   </div>
                 </div>

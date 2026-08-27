@@ -1,16 +1,22 @@
 // Headless end-to-end check of the SignalR hub: real-time chat delivery,
 // persistence, and the WebRTC signaling handshake. Run: node hub-test.mjs
 import * as signalR from '@microsoft/signalr'
+import { createHash } from 'node:crypto'
 
 // Varsayılan olarak backend'e doğrudan bağlanır. Tünel veya LAN üzerinden
 // sınamak için: HD_API=https://... node hub-test.mjs
 const API = process.env.HD_API || 'http://localhost:5088'
 
+// Ham parola sunucuya gitmiyor; karşılığı backend/Services/AuthVerifier.cs
+// ve frontend/src/crypto/keys.js → authVerifier()
+const authVerifier = (password) =>
+  createHash('sha256').update(`hellodoctor:auth:v1:${password}`).digest('base64')
+
 const login = async (email, role) => {
   const r = await fetch(`${API}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password: '1234', role }),
+    body: JSON.stringify({ email, password: authVerifier('1234'), role }),
   })
   if (!r.ok) throw new Error(`login failed for ${email}: ${r.status}`)
   return r.json()
@@ -63,9 +69,11 @@ const run = async () => {
   check('Her iki SignalR bağlantısı kuruldu', true)
 
   // --- 1. Real-time chat delivery ---
+  // Sinyal katmanı sınanıyor, şifreleme değil: encrypted=false ile düz metin
+  // gönderiliyor. Şifrelemenin kendisi tarayıcıda WebCrypto ile çalışıyor.
   const text = `Hub testi ${Date.now()}`
   const incoming = waitFor(dc, 'ReceiveMessage')
-  await pc.invoke('SendMessage', doctor.user.id, text)
+  await pc.invoke('SendMessage', doctor.user.id, text, false, null, null, null)
   const [msg] = await incoming
   check('Mesaj doktora anında ulaştı', msg.text === text, `"${msg.text}"`)
 
@@ -148,6 +156,9 @@ const run = async () => {
   await pc.invoke('EndCall', doctor.user.id)
 
   // --- 8. Bağlantı kopunca karşı tarafa haber gidiyor ---
+  // Dikkat: sunucu yalnızca kullanıcının SON bağlantısı kapanınca haber verir.
+  // Aynı demo hesapla açık bir tarayıcı sekmesi varsa bu test haklı olarak
+  // zaman aşımına uğrar — testi çalıştırmadan önce o sekmeleri kapatın.
   const reRing2 = waitFor(oc, 'IncomingCall')
   await pc.invoke('CallUser', other.user.id, 'voice')
   await reRing2

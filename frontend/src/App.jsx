@@ -6,6 +6,9 @@ import api from './api/client'
 import BottomNav from './components/BottomNav'
 import CallOverlay from './components/CallOverlay'
 import LoginScreen from './screens/LoginScreen'
+import RegisterScreen from './screens/RegisterScreen'
+import ForgotPasswordScreen from './screens/ForgotPasswordScreen'
+import ResetPasswordScreen from './screens/ResetPasswordScreen'
 import HomeScreen from './screens/HomeScreen'
 import AppointmentsScreen from './screens/AppointmentsScreen'
 import ConversationsScreen from './screens/ConversationsScreen'
@@ -46,8 +49,29 @@ function Shell() {
 }
 
 function Gate() {
-  const { user } = useAuth()
-  if (!user) return <LoginScreen />
+  const { user, ready } = useAuth()
+
+  // Oturum doğrulanmadan karar verilmiyor: bayat token'la açılışta önce
+  // uygulamayı gösterip sonra giriş ekranına düşmek kötü görünüyordu.
+  if (!ready) {
+    return (
+      <div className="screen" style={{ display: 'grid', placeItems: 'center' }}>
+        <div className="spinner" />
+      </div>
+    )
+  }
+
+  if (!user) {
+    return (
+      <Routes>
+        <Route path="/register" element={<RegisterScreen />} />
+        <Route path="/forgot-password" element={<ForgotPasswordScreen />} />
+        <Route path="/reset-password" element={<ResetPasswordScreen />} />
+        <Route path="*" element={<LoginScreen />} />
+      </Routes>
+    )
+  }
+
   return (
     <RealtimeProvider>
       <Shell />
