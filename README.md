@@ -298,6 +298,10 @@ docker compose down -v && docker compose up -d
 
 Sorgu desenlerine göre indeksler: `(ConversationId, SentAt)` sohbet açılışı, `(RecipientId, Read)` okunmamış sayacı, `(PatientId, ScheduledAt)` randevu listesi.
 
+Sohbet listesi (`GET /api/messages/conversations`) gruplamayı veritabanında yapar: `GROUP BY ConversationId` ile sohbet başına son mesaj zamanı ve okunmamış sayısı tek geçişte çıkar, ardından o son mesajlar `(ConversationId, SentAt)` indeksinden çekilir.
+
+"Son mesaj"ı `NOT EXISTS (daha yeni mesaj yok)` ile seçmek daha doğal görünüyor ama ölçünce tuzak olduğu görüldü: eşitlik dışındaki `SentAt >` koşulu hash'lenemediği için Postgres anti join'e düşüyor ve tek bir yoğun sohbette karşılaştırma sayısı kareyle büyüyor. 5000 mesajlık bir sohbette bu sürüm 880 ms, `GROUP BY` sürümü 14 ms sürdü.
+
 ## Bilinen sınırlar
 
 - WebRTC yalnızca `localhost` veya HTTPS üzerinde çalışır. Telefondan LAN IP'siyle test için HTTPS gerekir.
