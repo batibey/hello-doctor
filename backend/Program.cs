@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using StackExchange.Redis;
 
@@ -78,6 +79,11 @@ builder.Services.AddScoped<EmailSender>();
 
 builder.Services.Configure<AppointmentOptions>(
     builder.Configuration.GetSection(AppointmentOptions.SectionName));
+
+// Kurallar controller'dan ayrı: HTTP katmanı olmadan sınanabilsin.
+builder.Services.AddSingleton(sp => AppointmentRules.Create(
+    sp.GetRequiredService<IOptions<AppointmentOptions>>().Value,
+    sp.GetRequiredService<ILogger<AppointmentRules>>()));
 
 builder.Services.Configure<IceOptions>(builder.Configuration.GetSection(IceOptions.SectionName));
 builder.Services.AddHttpClient();

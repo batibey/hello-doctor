@@ -52,6 +52,8 @@ Mesajlaşma ve aramayı denemek için iki oturum açın: normal pencerede hasta,
 ## Testler
 
 ```bash
+dotnet test backend.Tests  # Birim testleri (sunucu/veritabanı gerekmez)
+
 cd frontend
 node hub-test.mjs          # SignalR: mesajlaşma + WebRTC sinyalleşme
 node appointment-test.mjs  # Randevu iş kuralları
@@ -59,6 +61,10 @@ node scaleout-test.mjs     # İki backend örneği arasında (Redis + 2 örnek g
 node crypto-test.mjs       # Uçtan uca şifreleme (bağımsız, sunucu gerekmez)
 node turn-test.mjs         # TURN kimlik bilgileri gerçekten çalışıyor mu
 ```
+
+`backend.Tests` saf mantığı sınar: randevu durum geçişleri ve çalışma saati kuralları, parola hash'leme, JWT anahtar doğrulaması, token içeriği, sohbet kimliği üretimi ve görüşme durumu deposu (eşzamanlılık dahil). Ayağa kalkan bir şeye ihtiyaç duymaz, milisaniyeler sürer.
+
+Bunlardan biri özellikle önemli: `AuthVerifier` sözleşmesi iki dilde ayrı ayrı uygulanıyor (`backend/Services/AuthVerifier.cs` ve `frontend/src/crypto/keys.js`). Test sabit bir değere kilitliyor; taraflardan biri değişirse giriş sessizce kırılmak yerine test patlar.
 
 `hub-test.mjs` mesaj iletimini, veritabanına yazımı, yazıyor göstergesini, WebRTC el sıkışmasını ve görüşmenin taraflarına ait olmayan sinyallerin reddedildiğini doğrular.
 
@@ -385,5 +391,4 @@ Betikler yerel dosyaya yazıyor. Gerçek bir kurulumda ayrıca gerekenler:
 
 Bu proje henüz üretime hazır değil. Kapatılmamış maddeler:
 
-- **Backend'de birim testi yok.** Yalnızca `hub-test.mjs` uçtan uca senaryosu var.
 - **Görüşmenin gerçek cihazlarda çalıştığı doğrulanmadı.** Farklı ağlar arasında ses/görüntü akışı ve TURN'ün devreye girmesi henüz sınanmadı.

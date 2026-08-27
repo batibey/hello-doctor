@@ -21,3 +21,8 @@ appsettings.Production.json
 
 # Veritabanı yedekleri
 backups/
+
+# Test çıktıları
+backend.Tests/bin/
+backend.Tests/obj/
+TestResults/
