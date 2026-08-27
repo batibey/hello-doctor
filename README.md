@@ -55,6 +55,7 @@ Mesajlaşma ve aramayı denemek için iki oturum açın: normal pencerede hasta,
 cd frontend
 node hub-test.mjs          # SignalR: mesajlaşma + WebRTC sinyalleşme
 node appointment-test.mjs  # Randevu iş kuralları
+node scaleout-test.mjs     # İki backend örneği arasında (Redis + 2 örnek gerekir)
 node crypto-test.mjs       # Uçtan uca şifreleme (bağımsız, sunucu gerekmez)
 node turn-test.mjs         # TURN kimlik bilgileri gerçekten çalışıyor mu
 ```
@@ -62,6 +63,8 @@ node turn-test.mjs         # TURN kimlik bilgileri gerçekten çalışıyor mu
 `hub-test.mjs` mesaj iletimini, veritabanına yazımı, yazıyor göstergesini, WebRTC el sıkışmasını ve görüşmenin taraflarına ait olmayan sinyallerin reddedildiğini doğrular.
 
 `appointment-test.mjs` onay/iptal yetkilerini, çakışma kontrolünü ve çalışma saati kurallarını doğrular.
+
+`scaleout-test.mjs` istemcileri **ayrı** backend örneklerine bağlar ve mesajlaşmanın, varlık bilgisinin, görüşme eşleşmesinin ve sinyal yetkilendirmesinin örnekler arasında çalıştığını doğrular. Kurulumu aşağıda.
 
 `crypto-test.mjs` anahtar sarmalamayı, mesaj şifrelemeyi, yabancının çözemediğini ve şifre sıfırlandığında eski mesajların okunamaz hale geldiğini doğrular. Tarayıcı gerekmez — WebCrypto Node 18+ içinde var, uygulamanın kullandığı modülün aynısı çalışır.
 
@@ -76,6 +79,7 @@ Ayarlar `backend/appsettings.json` içinde; her biri ortam değişkeniyle geçer
 | `ConnectionStrings__Postgres` | Veritabanı bağlantı dizesi |
 | `Cors__AllowedOrigins__0`, `__1`… | İzin verilen origin'ler. **Üretimde zorunlu.** |
 | `RateLimit__LoginPerMinute` | IP başına dakikada giriş denemesi (varsayılan 5) |
+| `ConnectionStrings__Redis` | Birden fazla örnek için. Boşken durum süreç belleğinde. |
 | `Https__RedirectToHttps` | HTTP isteklerini HTTPS'e yönlendir (varsayılan açık, Development hariç) |
 | `Https__HttpsPort` | Yönlendirmenin hedef portu (varsayılan 443) |
 | `Https__HstsMaxAgeDays` | HSTS süresi (varsayılan 365) |
@@ -118,6 +122,34 @@ Kayıt (`/register`), şifremi unuttum (`/forgot-password`) ve sıfırlama (`/re
 Sıfırlama token'ı 1 saat geçerli, tek kullanımlık ve veritabanında yalnızca hash'i tutuluyor — veritabanı sızsa bile bağlantılar kullanılamaz. Yeni bir istek, bekleyen eski token'ları geçersiz kılıyor. `forgot-password` adresin kayıtlı olup olmadığına bakmaksızın aynı yanıtı veriyor; aksi halde bu uç nokta kimlerin üye olduğunu öğrenmek için kullanılabilirdi.
 
 Geliştirmede e-postalar `docker compose` ile gelen **Mailpit**'e düşer: <http://localhost:8025>. Gerçek gönderim için `Smtp__*` değişkenlerini doldurun.
+
+## Birden fazla örnekle çalıştırma
+
+Varsayılan kurulum tek backend örneğine göredir: bağlantılar, varlık bilgisi ve görüşme eşleşmeleri süreç belleğinde tutulur. Geliştirme ve tek sunuculu kurulumlar ek altyapı istemesin diye böyle.
+
+Yatay ölçekleme için Redis bağlayın:
+
+```bash
+docker compose up -d redis
+export ConnectionStrings__Redis="localhost:6379"
+```
+
+Bu tanımlıyken iki şey birden devreye girer:
+
+- **SignalR backplane** — hub mesajları örnekler arasında dağıtılır.
+- **Paylaşılan görüşme durumu** — varlık (kim çevrimiçi) ve eşleşme (kim kiminle görüşüyor) Redis'te tutulur. `ICallStateStore` arkasında; Redis yoksa bellek içi uygulaması kullanılır.
+
+Bağlantı listesi uygulamada hiç tutulmuyor: SignalR onu kendisi tutuyor ve `Clients.User(userId)` ile erişiliyor, backplane sayesinde örnekler arasında da çalışıyor.
+
+Süreç çökerse bağlantı kaydı silinemeyeceği için varlık anahtarlarında 12 saatlik, eşleşme anahtarlarında 2 saatlik TTL var — kullanıcı sonsuza dek çevrimiçi ya da meşgul görünmesin.
+
+Doğrulamak için iki örnek açıp `scaleout-test.mjs` çalıştırın:
+
+```bash
+ConnectionStrings__Redis=localhost:6379 dotnet run --no-launch-profile --urls http://localhost:5088
+ConnectionStrings__Redis=localhost:6379 dotnet run --no-launch-profile --urls http://localhost:5090
+cd frontend && node scaleout-test.mjs
+```
 
 ## Log ve sağlık kontrolü
 
@@ -308,7 +340,7 @@ Sohbet listesi (`GET /api/messages/conversations`) gruplamayı veritabanında ya
 - TURN yapılandırılmadıysa doğrudan bağlanamayan kullanıcılar görüşemez (hata mesajı gösterilir).
 - Veritabanı şifresi `appsettings.json` içinde geliştirme değeriyle duruyor; üretimde `ConnectionStrings__Postgres` ile geçersiz kılın.
 - Giriş sınırı `RemoteIpAddress`'e göre bölümleniyor. Ters vekil arkasında doğru çalışması için `Https__UseForwardedHeaders` açılmalı (bkz. HTTPS ve HSTS).
-- `CallHub` bağlantı ve görüşme eşleşmelerini süreç belleğinde tutuyor — tek instance'a bağlı. Yatay ölçekleme için Redis backplane gerekir.
+- Varlık bilgisi anlık değil: bir kullanıcı yeniden bağlanırken (ağ kesintisi, sekme yenileme) kaydı silinip yeniden yazılana kadar kısa bir süre çevrimdışı görünebilir. Bu aralıkta gelen arama "kullanıcı çevrimiçi değil" alır; tekrar denemek yeterli.
 
 ## Canlıya çıkmadan önce
 

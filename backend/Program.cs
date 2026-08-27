@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,7 +29,28 @@ if (!builder.Environment.IsDevelopment())
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSignalR();
+
+// ---- SignalR ve görüşme durumu ----
+// Redis tanımlıysa uygulama birden fazla örnekle çalışabilir: backplane hub
+// mesajlarını örnekler arasında dağıtır, varlık ve görüşme eşleşmesi de
+// paylaşılan depoda tutulur. Tanımsızsa her ikisi de süreç belleğinde kalır —
+// geliştirme ve tek sunuculu kurulum ek altyapı istemesin.
+var redisConnection = builder.Configuration.GetConnectionString("Redis");
+var signalR = builder.Services.AddSignalR();
+
+if (!string.IsNullOrWhiteSpace(redisConnection))
+{
+    signalR.AddStackExchangeRedis(redisConnection, o => o.Configuration.ChannelPrefix =
+        StackExchange.Redis.RedisChannel.Literal("hellodoctor"));
+
+    builder.Services.AddSingleton<IConnectionMultiplexer>(
+        _ => ConnectionMultiplexer.Connect(redisConnection));
+    builder.Services.AddSingleton<ICallStateStore, RedisCallStateStore>();
+}
+else
+{
+    builder.Services.AddSingleton<ICallStateStore, InMemoryCallStateStore>();
+}
 
 var connectionString = builder.Configuration.GetConnectionString("Postgres")
     ?? throw new InvalidOperationException("ConnectionStrings:Postgres tanımlı değil.");

@@ -17,6 +17,21 @@ services:
       timeout: 5s
       retries: 10
 
+  # SignalR backplane + görüşme durumu. Yalnızca birden fazla backend örneği
+  # çalıştıracaksanız gerekli; tek örnekte uygulama süreç belleğini kullanır.
+  # Bağlamak için: ConnectionStrings__Redis=localhost:6379
+  redis:
+    image: redis:7-alpine
+    container_name: hellodoctor-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   # Yerel SMTP yakalayıcı: şifre sıfırlama e-postaları gerçekten gönderilir ama
   # dışarı çıkmaz, http://localhost:8025 arayüzünde görünür. Gerçek bir SMTP
   # sağlayıcısına Smtp__* ortam değişkenleriyle geçilir.
