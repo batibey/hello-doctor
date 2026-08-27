@@ -53,12 +53,15 @@ Mesajlaşma ve aramayı denemek için iki oturum açın: normal pencerede hasta,
 
 ```bash
 cd frontend
-node hub-test.mjs      # SignalR: mesajlaşma + WebRTC sinyalleşme (backend çalışıyor olmalı)
-node crypto-test.mjs   # Uçtan uca şifreleme (bağımsız, sunucu gerekmez)
-node turn-test.mjs     # TURN kimlik bilgileri gerçekten çalışıyor mu
+node hub-test.mjs          # SignalR: mesajlaşma + WebRTC sinyalleşme
+node appointment-test.mjs  # Randevu iş kuralları
+node crypto-test.mjs       # Uçtan uca şifreleme (bağımsız, sunucu gerekmez)
+node turn-test.mjs         # TURN kimlik bilgileri gerçekten çalışıyor mu
 ```
 
 `hub-test.mjs` mesaj iletimini, veritabanına yazımı, yazıyor göstergesini, WebRTC el sıkışmasını ve görüşmenin taraflarına ait olmayan sinyallerin reddedildiğini doğrular.
+
+`appointment-test.mjs` onay/iptal yetkilerini, çakışma kontrolünü ve çalışma saati kurallarını doğrular.
 
 `crypto-test.mjs` anahtar sarmalamayı, mesaj şifrelemeyi, yabancının çözemediğini ve şifre sıfırlandığında eski mesajların okunamaz hale geldiğini doğrular. Tarayıcı gerekmez — WebCrypto Node 18+ içinde var, uygulamanın kullandığı modülün aynısı çalışır.
 
@@ -73,6 +76,11 @@ Ayarlar `backend/appsettings.json` içinde; her biri ortam değişkeniyle geçer
 | `ConnectionStrings__Postgres` | Veritabanı bağlantı dizesi |
 | `Cors__AllowedOrigins__0`, `__1`… | İzin verilen origin'ler. **Üretimde zorunlu.** |
 | `RateLimit__LoginPerMinute` | IP başına dakikada giriş denemesi (varsayılan 5) |
+| `Appointments__SlotMinutes` | Randevu süresi, çakışma kontrolü buna göre (varsayılan 30) |
+| `Appointments__TimeZone` | Çalışma saatlerinin değerlendirildiği dilim (varsayılan Europe/Istanbul) |
+| `Appointments__WorkingHourStart`, `__WorkingHourEnd` | Çalışma saati aralığı (varsayılan 9–18) |
+| `Appointments__WorkingDays__0`, `__1`… | 0 Pazar … 6 Cumartesi (varsayılan hafta içi) |
+| `Appointments__MinimumNoticeMinutes` | Randevu en erken bu kadar sonrasına (varsayılan 30) |
 | `Ice__MeteredApiKey` | Metered API anahtarı. **Asla appsettings.json'a yazmayın.** |
 | `Ice__MeteredSubdomain` | Metered panelindeki alt alan adı |
 | `Ice__TurnUrls__0`, `__1`… | Kendi TURN sunucunuz (Metered yerine) |
@@ -104,6 +112,17 @@ Kayıt (`/register`), şifremi unuttum (`/forgot-password`) ve sıfırlama (`/re
 Sıfırlama token'ı 1 saat geçerli, tek kullanımlık ve veritabanında yalnızca hash'i tutuluyor — veritabanı sızsa bile bağlantılar kullanılamaz. Yeni bir istek, bekleyen eski token'ları geçersiz kılıyor. `forgot-password` adresin kayıtlı olup olmadığına bakmaksızın aynı yanıtı veriyor; aksi halde bu uç nokta kimlerin üye olduğunu öğrenmek için kullanılabilirdi.
 
 Geliştirmede e-postalar `docker compose` ile gelen **Mailpit**'e düşer: <http://localhost:8025>. Gerçek gönderim için `Smtp__*` değişkenlerini doldurun.
+
+## Randevu kuralları
+
+- **Onay doktorda.** Hasta randevu talebi oluşturur, durum `Pending` başlar; yalnızca doktor `Confirmed` yapabilir.
+- **İptal her iki tarafta.** Hasta da doktor da iptal edebilir.
+- **Tamamlandı doktorda.** Görüşmeyi tamamlandı işaretlemek klinik bir kayıt olduğu için doktorun yetkisinde ve randevunun önce onaylanmış olması gerekir.
+- **Sonlanmış randevu değişmez.** `Completed` ve `Cancelled` uçtur; geri açılamaz.
+- **Çakışma engellenir.** Aynı doktorun dolu saatine ikinci randevu alınamaz; hasta da aynı saate iki randevu alamaz. İptal edilen randevunun saati yeniden serbest kalır.
+- **Geçmişe ve çok yakına randevu alınamaz**, çalışma günü ve saati dışına da.
+
+Bunların hepsi sunucuda uygulanıyor; arayüzdeki düğmeler yalnızca izin verilen işlemleri gösteriyor ve reddedilen bir geçiş kullanıcıya sebebiyle bildiriliyor.
 
 ## Uçtan uca şifreleme
 
@@ -236,7 +255,6 @@ Sorgu desenlerine göre indeksler: `(ConversationId, SentAt)` sohbet açılış�
 
 Bu proje henüz üretime hazır değil. Kapatılmamış maddeler:
 
-- **Randevu iş kuralları eksik.** Hasta kendi randevusunu onaylayabiliyor, geçmişe randevu alınabiliyor, çakışma kontrolü yok.
 - **HTTPS zorlaması ve HSTS yok.** Yapılandırılmış log, health check ve yedekleme planı da yok.
 - **Backend'de birim testi yok.** Yalnızca `hub-test.mjs` uçtan uca senaryosu var.
 - **Görüşmenin gerçek cihazlarda çalıştığı doğrulanmadı.** Farklı ağlar arasında ses/görüntü akışı ve TURN'ün devreye girmesi henüz sınanmadı.

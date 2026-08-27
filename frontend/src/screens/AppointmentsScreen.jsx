@@ -11,13 +11,21 @@ export default function AppointmentsScreen() {
   const nav = useNavigate()
   const [appts, setAppts] = useState(null)
   const [tab, setTab] = useState('upcoming')
+  const [error, setError] = useState('')
 
   const load = () => api.get('/appointments').then(({ data }) => setAppts(data)).catch(() => setAppts([]))
   useEffect(() => { load() }, [])
 
+  // Sunucu artık geçersiz durum geçişlerini reddediyor (onay doktorda, sonlanmış
+  // randevu değişmez). Hatayı yutmak, düğmeye basıp hiçbir şey olmaması demekti.
   const setStatus = async (id, status) => {
-    await api.put(`/appointments/${id}/status`, { status })
-    load()
+    setError('')
+    try {
+      await api.put(`/appointments/${id}/status`, { status })
+      load()
+    } catch (err) {
+      setError(err?.response?.data?.message || 'Randevu güncellenemedi.')
+    }
   }
 
   const startCallWith = (a) => {
@@ -40,6 +48,10 @@ export default function AppointmentsScreen() {
             <button key={val} onClick={() => setTab(val)} style={{ flex: 1, padding: 10, borderRadius: 12, fontWeight: 700, fontSize: 14, background: tab === val ? 'var(--grad-brand)' : 'transparent', color: tab === val ? '#fff' : 'var(--text-dim)' }}>{label}</button>
           ))}
         </div>
+
+        {error && (
+          <div className="pill rose" style={{ justifyContent: 'center', marginBottom: 14, width: '100%' }}>{error}</div>
+        )}
 
         {appts === null ? <Loader /> : list.length === 0 ? (
           <div className="card" style={{ textAlign: 'center', padding: 30, color: 'var(--text-dim)' }}>
@@ -84,7 +96,14 @@ export default function AppointmentsScreen() {
                         <>
                           {callable && <button className="btn primary" style={{ flex: 1, padding: 11 }} onClick={() => startCallWith(a)}><Icon name={a.type === 'Voice' ? 'phone' : 'video'} size={16} /> {a.type === 'Voice' ? 'Ara' : 'Görüşme'}</button>}
                           <button className="btn" style={{ flex: callable ? 0 : 1, padding: 11 }} onClick={() => nav(`/chat/${isDoctor ? a.patientId : a.doctorId}`)}><Icon name="chat" size={16} /> {callable ? '' : 'Mesaj'}</button>
-                          {a.status !== 'Cancelled' && <button className="btn" style={{ padding: 11 }} onClick={() => setStatus(a.id, 'Cancelled')}>İptal</button>}
+                          {/* Görüşmeyi tamamlandı işaretlemek klinik bir kayıt: yalnızca doktorda. */}
+                          {isDoctor && a.status === 'Confirmed' && (
+                            <button className="btn mint" style={{ padding: 11 }} onClick={() => setStatus(a.id, 'Completed')}><Icon name="check" size={16} /> Bitir</button>
+                          )}
+                          {/* Sonlanmış randevular değişmez; sunucu da reddediyor. */}
+                          {a.status !== 'Cancelled' && a.status !== 'Completed' && (
+                            <button className="btn" style={{ padding: 11 }} onClick={() => setStatus(a.id, 'Cancelled')}>İptal</button>
+                          )}
                         </>
                       )}
                     </div>

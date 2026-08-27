@@ -38,6 +38,9 @@ builder.Services.AddSingleton<PasswordService>();
 builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
 builder.Services.AddScoped<EmailSender>();
 
+builder.Services.Configure<AppointmentOptions>(
+    builder.Configuration.GetSection(AppointmentOptions.SectionName));
+
 builder.Services.Configure<IceOptions>(builder.Configuration.GetSection(IceOptions.SectionName));
 builder.Services.AddHttpClient();
 // Önbellek örnek içinde tutulduğu için singleton.
