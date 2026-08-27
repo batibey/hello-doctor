@@ -310,6 +310,27 @@ export Ice__IceTransportPolicy=relay
 
 Bu ayarla görüşme kurulabiliyorsa TURN gerçekten devrededir. Üretimde `all` kalmalı.
 
+### Gerçek cihaz doğrulaması
+
+2026-08-27'de Mac (Chrome) ile telefon (Safari) arasında sınandı; görüntü ve ses iki yönde de aktı.
+
+Ölçüm önemliydi: **ilk denemede TURN hiç devreye girmedi.** Seçilen aday çifti `host ↔ host` (`192.168.1.101 ↔ 192.168.1.100`) çıktı — iki cihaz aynı WiFi'daydı ve bağlantı doğrudan LAN üzerinden kuruldu. Görüşmenin çalışması TURN'ün çalıştığı anlamına gelmiyordu.
+
+`Ice__IceTransportPolicy=relay` ile doğrudan bağlantı tamamen kapatılıp tekrar denendi:
+
+```
+policy                      : relay
+connectionState             : connected
+üretilen yerel aday tipleri : ["relay"]        ← host/srflx hiç üretilmedi
+seçilen yerel               : relay udp 172.232.192.83
+gönderilen / alınan         : 127 KB / 99 KB
+gecikme                     : 379 ms
+```
+
+Adres, `turn-test.mjs`'in relay ayırdığı Metered sunucusunun aynısı. Tarayıcı doğrudan bağlantı adayı hiç üretmediği için "gizlice LAN'dan gitti" ihtimali yok.
+
+**Çıkarım:** görüşmenin kurulması TURN'ü doğrulamaz. TURN'ü sınamak istiyorsanız ya cihazlardan birini mobil veriye alın ya da `relay` politikasını kullanın.
+
 ### Hata durumları
 
 Bağlantı kurulamadığında arama ekranı sessizce takılmaz; nedeni belirten bir mesaj gösterir: izin reddi, cihaz bulunamaması, yanıt verilmemesi (45 sn), bağlantı zaman aşımı (30 sn) ve ICE başarısızlığı ayrı ayrı ele alınır.
@@ -391,4 +412,3 @@ Betikler yerel dosyaya yazıyor. Gerçek bir kurulumda ayrıca gerekenler:
 
 Bu proje henüz üretime hazır değil. Kapatılmamış maddeler:
 
-- **Görüşmenin gerçek cihazlarda çalıştığı doğrulanmadı.** Farklı ağlar arasında ses/görüntü akışı ve TURN'ün devreye girmesi henüz sınanmadı.
