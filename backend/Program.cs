@@ -1,9 +1,11 @@
+using System.Net;
 using System.Text;
 using System.Threading.RateLimiting;
 using HelloDoctor.Api.Data;
 using HelloDoctor.Api.Hubs;
 using HelloDoctor.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -129,7 +131,68 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 
+// ---- HTTPS / HSTS ----
+// Geliştirmede kapalı: Vite proxy'si http://localhost:5088'e gidiyor ve yerel
+// TLS yok; yönlendirme açık olsa geliştirme tamamen kırılırdı.
+var httpsSection = builder.Configuration.GetSection(HttpsOptions.SectionName);
+var httpsOptions = httpsSection.Get<HttpsOptions>() ?? new HttpsOptions();
+var httpsEnabled = !builder.Environment.IsDevelopment() && httpsOptions.RedirectToHttps;
+
+builder.Services.Configure<HttpsOptions>(httpsSection);
+
+if (httpsEnabled)
+{
+    builder.Services.AddHttpsRedirection(o => o.HttpsPort = httpsOptions.HttpsPort);
+
+    builder.Services.AddHsts(o =>
+    {
+        o.MaxAge = TimeSpan.FromDays(httpsOptions.HstsMaxAgeDays);
+        o.IncludeSubDomains = httpsOptions.HstsIncludeSubdomains;
+        o.Preload = httpsOptions.HstsPreload;
+    });
+}
+
+if (httpsOptions.UseForwardedHeaders)
+{
+    builder.Services.Configure<ForwardedHeadersOptions>(o =>
+    {
+        o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+
+        // Varsayılan liste loopback içerir. Açıkça vekil verildiyse yalnızca
+        // ona güvenilir: rastgele bir kaynağın X-Forwarded-For uydurup giriş
+        // hız sınırını IP taklidiyle aşmasını engeller.
+        if (httpsOptions.KnownProxies.Length > 0 || httpsOptions.KnownNetworks.Length > 0)
+        {
+            o.KnownProxies.Clear();
+            o.KnownNetworks.Clear();
+        }
+
+        foreach (var ip in httpsOptions.KnownProxies)
+            if (IPAddress.TryParse(ip, out var parsed)) o.KnownProxies.Add(parsed);
+
+        foreach (var cidr in httpsOptions.KnownNetworks)
+        {
+            var parts = cidr.Split('/');
+            // System.Net.IPNetwork ile karışmasın: KnownNetworks ASP.NET'inkini bekliyor.
+            if (parts.Length == 2 && IPAddress.TryParse(parts[0], out var prefix)
+                && int.TryParse(parts[1], out var length))
+                o.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(prefix, length));
+        }
+    });
+}
+
 var app = builder.Build();
+
+// En başta olmalı: sonraki her katman isteğin şemasına ve gerçek istemci
+// IP'sine bakıyor (HTTPS yönlendirmesi, HSTS, giriş hız sınırı).
+if (httpsOptions.UseForwardedHeaders)
+    app.UseForwardedHeaders();
+
+if (httpsEnabled)
+{
+    app.UseHsts();
+    app.UseHttpsRedirection();
+}
 
 app.UseCors(CorsPolicy);
 app.UseRateLimiter();

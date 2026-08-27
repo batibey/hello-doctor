@@ -76,6 +76,12 @@ Ayarlar `backend/appsettings.json` içinde; her biri ortam değişkeniyle geçer
 | `ConnectionStrings__Postgres` | Veritabanı bağlantı dizesi |
 | `Cors__AllowedOrigins__0`, `__1`… | İzin verilen origin'ler. **Üretimde zorunlu.** |
 | `RateLimit__LoginPerMinute` | IP başına dakikada giriş denemesi (varsayılan 5) |
+| `Https__RedirectToHttps` | HTTP isteklerini HTTPS'e yönlendir (varsayılan açık, Development hariç) |
+| `Https__HttpsPort` | Yönlendirmenin hedef portu (varsayılan 443) |
+| `Https__HstsMaxAgeDays` | HSTS süresi (varsayılan 365) |
+| `Https__HstsIncludeSubdomains`, `__HstsPreload` | HSTS kapsamı. **Preload geri alınamaz.** |
+| `Https__UseForwardedHeaders` | **Ters vekil arkasındaysanız zorunlu.** |
+| `Https__KnownProxies__0`, `__KnownNetworks__0` | Güvenilecek vekiller |
 | `Appointments__SlotMinutes` | Randevu süresi, çakışma kontrolü buna göre (varsayılan 30) |
 | `Appointments__TimeZone` | Çalışma saatlerinin değerlendirildiği dilim (varsayılan Europe/Istanbul) |
 | `Appointments__WorkingHourStart`, `__WorkingHourEnd` | Çalışma saati aralığı (varsayılan 9–18) |
@@ -112,6 +118,29 @@ Kayıt (`/register`), şifremi unuttum (`/forgot-password`) ve sıfırlama (`/re
 Sıfırlama token'ı 1 saat geçerli, tek kullanımlık ve veritabanında yalnızca hash'i tutuluyor — veritabanı sızsa bile bağlantılar kullanılamaz. Yeni bir istek, bekleyen eski token'ları geçersiz kılıyor. `forgot-password` adresin kayıtlı olup olmadığına bakmaksızın aynı yanıtı veriyor; aksi halde bu uç nokta kimlerin üye olduğunu öğrenmek için kullanılabilirdi.
 
 Geliştirmede e-postalar `docker compose` ile gelen **Mailpit**'e düşer: <http://localhost:8025>. Gerçek gönderim için `Smtp__*` değişkenlerini doldurun.
+
+## HTTPS ve HSTS
+
+Development dışında HTTP istekleri HTTPS'e yönlendirilir ve `Strict-Transport-Security` başlığı eklenir. Geliştirmede kapalıdır — Vite proxy'si `http://localhost:5088`'e gidiyor, açık olsa yerel geliştirme kırılırdı.
+
+### Ters vekil arkasındaysanız
+
+nginx, Caddy, ALB veya Cloudflare TLS'i sonlandırıp uygulamaya düz HTTP iletir. Bu durumda `Https__UseForwardedHeaders=true` **şart**:
+
+```bash
+export Https__UseForwardedHeaders=true
+export Https__KnownProxies__0="10.0.0.5"      # vekilin IP'si
+# ya da ağ olarak:
+export Https__KnownNetworks__0="10.0.0.0/8"
+```
+
+Açmazsanız uygulama isteği HTTP sanar ve vekil ile uygulama arasında **sonsuz yönlendirme döngüsü** oluşur.
+
+Güvenilecek vekili daraltmak önemli: liste boş bırakılırsa yalnızca loopback güvenilir, ama herhangi bir kaynağa güvenilirse istemci `X-Forwarded-For` uydurup giriş hız sınırını IP taklidiyle aşabilir. Bu ayar aynı zamanda hız sınırının gerçek istemci IP'sini görmesini sağlar.
+
+### Preload uyarısı
+
+`HstsPreload` pratikte geri alınamaz: tarayıcılar alan adını gömülü listeyle dağıtır ve listeden çıkmak aylar sürer. Alan adının tüm alt alanları kalıcı olarak HTTPS'e bağlanacaksa açın.
 
 ## Randevu kuralları
 
@@ -248,13 +277,13 @@ Sorgu desenlerine göre indeksler: `(ConversationId, SentAt)` sohbet açılış�
 - WebRTC yalnızca `localhost` veya HTTPS üzerinde çalışır. Telefondan LAN IP'siyle test için HTTPS gerekir.
 - TURN yapılandırılmadıysa doğrudan bağlanamayan kullanıcılar görüşemez (hata mesajı gösterilir).
 - Veritabanı şifresi `appsettings.json` içinde geliştirme değeriyle duruyor; üretimde `ConnectionStrings__Postgres` ile geçersiz kılın.
-- Giriş sınırı `RemoteIpAddress`'e göre bölümleniyor. Ters vekil sunucu arkasında tüm istekler vekilin IP'sinden görünür; o kurulumda `UseForwardedHeaders` yapılandırılmalı.
+- Giriş sınırı `RemoteIpAddress`'e göre bölümleniyor. Ters vekil arkasında doğru çalışması için `Https__UseForwardedHeaders` açılmalı (bkz. HTTPS ve HSTS).
 - `CallHub` bağlantı ve görüşme eşleşmelerini süreç belleğinde tutuyor — tek instance'a bağlı. Yatay ölçekleme için Redis backplane gerekir.
 
 ## Canlıya çıkmadan önce
 
 Bu proje henüz üretime hazır değil. Kapatılmamış maddeler:
 
-- **HTTPS zorlaması ve HSTS yok.** Yapılandırılmış log, health check ve yedekleme planı da yok.
+- **Yapılandırılmış log, health check ve yedekleme planı yok.**
 - **Backend'de birim testi yok.** Yalnızca `hub-test.mjs` uçtan uca senaryosu var.
 - **Görüşmenin gerçek cihazlarda çalıştığı doğrulanmadı.** Farklı ağlar arasında ses/görüntü akışı ve TURN'ün devreye girmesi henüz sınanmadı.
