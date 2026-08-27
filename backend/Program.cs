@@ -12,6 +12,20 @@ using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Üretimde JSON: log toplayıcılar (Loki, CloudWatch, Datadog) satırları
+// ayrıştırabilsin ve alanlara göre sorgulanabilsin. Geliştirmede okunabilir
+// konsol formatı kalır.
+if (!builder.Environment.IsDevelopment())
+{
+    builder.Logging.ClearProviders();
+    builder.Logging.AddJsonConsole(o =>
+    {
+        o.IncludeScopes = true;
+        o.TimestampFormat = "o";
+        o.UseUtcTimestamp = true;
+    });
+}
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSignalR();
@@ -131,6 +145,10 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 
+// Veritabanı erişilebilirliği "ready" etiketiyle: canlılık kontrolü ona bakmaz.
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<AppDbContext>("postgres", tags: ["ready"]);
+
 // ---- HTTPS / HSTS ----
 // Geliştirmede kapalı: Vite proxy'si http://localhost:5088'e gidiyor ve yerel
 // TLS yok; yönlendirme açık olsa geliştirme tamamen kırılırdı.
@@ -188,6 +206,12 @@ var app = builder.Build();
 if (httpsOptions.UseForwardedHeaders)
     app.UseForwardedHeaders();
 
+// Yetkilendirmeden ÖNCE: UseAuthorization yetkisiz isteği 401 ile kısa devre
+// yapıyor, sonrasına konsaydı başarısız kimlik denemeleri hiç loglanmazdı.
+// Kullanıcı kimliği yine de yazılıyor, çünkü satır boru hattı geri sarılırken
+// (_next tamamlandıktan sonra) üretiliyor ve o noktada User dolu.
+app.UseRequestLogging();
+
 if (httpsEnabled)
 {
     app.UseHsts();
@@ -201,6 +225,7 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<CallHub>("/hubs/call");
+app.MapHealthEndpoints();
 app.MapGet("/", () => "HelloDoctor API çalışıyor 🩺");
 
 // Apply migrations and seed demo data on startup.

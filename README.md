@@ -119,6 +119,32 @@ Sıfırlama token'ı 1 saat geçerli, tek kullanımlık ve veritabanında yalnı
 
 Geliştirmede e-postalar `docker compose` ile gelen **Mailpit**'e düşer: <http://localhost:8025>. Gerçek gönderim için `Smtp__*` değişkenlerini doldurun.
 
+## Log ve sağlık kontrolü
+
+Geliştirmede okunabilir konsol logu, **üretimde satır başına tek JSON** — log toplayıcılar (Loki, CloudWatch, Datadog) alanlara göre sorgulayabilsin diye.
+
+Her istek tek satır üretir: yöntem, yol, durum kodu, süre, kullanıcı kimliği, istemci IP'si ve iz kimliği. Durum koduna göre seviye ayarlanır (5xx hata, 4xx uyarı), böylece üretimde seviyeyi yükseltince gürültü değil gerçek sorunlar kalır.
+
+**Sorgu dizesi bilerek loglanmaz.** SignalR JWT'yi `?access_token=` ile taşıyor (WebSocket'te `Authorization` başlığı gönderilemediği için) ve şifre sıfırlama token'ı da sorgu dizesinde geliyor; bunlar loga düşerse log dosyasını gören herkes oturum ele geçirebilir.
+
+Log satırı yetkilendirmeden **önce** üretilir, yoksa `401` alan istekler hiç loglanmazdı — başarısız kimlik denemeleri tam da görülmesi gereken şey. Kullanıcı kimliği yine de yazılır, çünkü satır boru hattı geri sarılırken oluşturulur.
+
+### Uçlar
+
+| Uç | Neyi söyler |
+|---|---|
+| `GET /health/live` | Süreç ayakta mı. Bağımlılıklara bakmaz — başarısızsa konteyner yeniden başlatılmalı. |
+| `GET /health/ready` | İstek karşılayabilir mi. Veritabanına bakar — başarısızsa trafik kesilmeli ama süreç öldürülmemeli. |
+
+Ayrım önemli: veritabanı geçici düştüğünde uygulamayı yeniden başlatmak işe yaramaz, o yüzden `live` veritabanına bakmaz.
+
+```bash
+curl localhost:5088/health/ready
+# {"status":"Healthy","checks":[{"name":"postgres","status":"Healthy"}]}
+```
+
+Uçlar kimlik doğrulaması istemez (orkestratör token taşıyamaz), bu yüzden gövde yalnızca kontrol adı ve durumu içerir — istisna metni ve süre bilgisi dışarı verilmez. `/health` istekleri kendi loglarını üretmez, saniyede bir çağrıldıkları için logu boğarlardı.
+
 ## HTTPS ve HSTS
 
 Development dışında HTTP istekleri HTTPS'e yönlendirilir ve `Strict-Transport-Security` başlığı eklenir. Geliştirmede kapalıdır — Vite proxy'si `http://localhost:5088`'e gidiyor, açık olsa yerel geliştirme kırılırdı.
@@ -284,6 +310,6 @@ Sorgu desenlerine göre indeksler: `(ConversationId, SentAt)` sohbet açılış�
 
 Bu proje henüz üretime hazır değil. Kapatılmamış maddeler:
 
-- **Yapılandırılmış log, health check ve yedekleme planı yok.**
+- **Yedekleme ve felaket kurtarma planı yok.**
 - **Backend'de birim testi yok.** Yalnızca `hub-test.mjs` uçtan uca senaryosu var.
 - **Görüşmenin gerçek cihazlarda çalıştığı doğrulanmadı.** Farklı ağlar arasında ses/görüntü akışı ve TURN'ün devreye girmesi henüz sınanmadı.
