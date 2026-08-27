@@ -334,6 +334,45 @@ Sohbet listesi (`GET /api/messages/conversations`) gruplamayı veritabanında ya
 
 "Son mesaj"ı `NOT EXISTS (daha yeni mesaj yok)` ile seçmek daha doğal görünüyor ama ölçünce tuzak olduğu görüldü: eşitlik dışındaki `SentAt >` koşulu hash'lenemediği için Postgres anti join'e düşüyor ve tek bir yoğun sohbette karşılaştırma sayısı kareyle büyüyor. 5000 mesajlık bir sohbette bu sürüm 880 ms, `GROUP BY` sürümü 14 ms sürdü.
 
+## Yedekleme ve geri yükleme
+
+```bash
+./scripts/backup.sh                    # backups/ altına, doğrulanmış dump
+./scripts/restore.sh --latest          # en son yedekten geri yükle
+./scripts/restore.sh backups/x.dump    # belirli bir yedekten
+```
+
+Yedek alındıktan sonra `pg_restore --list` ile okunabilirliği doğrulanır ve dosya ancak o zaman adını alır — yarım kalmış bir dump'ın geçerli yedek sanılması, yedeğin hiç olmamasından kötüdür.
+
+Geri yükleme, üzerine yazmadan önce mevcut durumun yedeğini `backups/pre-restore-*.dump` olarak alır; yanlış dosya seçildiğinde dönüş yolu kalsın diye. Sonrasında backend yeniden başlatılmalı, havuzdaki bağlantılar koptuğu için.
+
+### Şifreleme yedeklemeyi nasıl etkiliyor
+
+**Mesajların okunabilirliği `Users` tablosundaki anahtar sütunlarına bağlı.** `WrappedPrivateKey`, `KeyWrapSalt` ve `KeyWrapIv` kaybolursa `Messages` tablosu eksiksiz geri gelse bile içerik kalıcı olarak açılamaz — sunucuda çözebilecek bir anahtar yok. Bu yüzden **tablo bazlı kısmi geri yükleme yapmayın**; yedeklemenin ve geri yüklemenin birimi tüm veritabanıdır.
+
+Yukarıdaki betikler bunu sağlıyor. Geri yükleme sonrası şifreli bir mesajın hâlâ çözülebildiği sınandı.
+
+### Redis yedeklenmez
+
+Yalnızca varlık ve görüşme eşleşmesi tutuyor; ikisi de geçici. Kaybolursa o anda süren görüşmeler düşer, kalıcı veri kaybı olmaz.
+
+### Zamanlama
+
+```cron
+0 3 * * * cd /opt/hellodoctor && ./scripts/backup.sh >> /var/log/hellodoctor-backup.log 2>&1
+```
+
+`RETENTION_DAYS` (varsayılan 14) eski yedekleri budar, `BACKUP_DIR` hedefi değiştirir.
+
+### Üretim için eksikler
+
+Betikler yerel dosyaya yazıyor. Gerçek bir kurulumda ayrıca gerekenler:
+
+- **Yedekler makine dışına alınmalı.** Sunucuyla aynı diskte duran yedek, disk arızasında yedek değildir.
+- **Yedekler şifrelenmeli.** Dump; e-posta, ad ve randevu bilgisi içeriyor (mesaj içerikleri şifreli, ama üst veri değil). Sağlık verisi için beklenen budur. Bu katman bilerek eklenmedi — anahtar yönetimi kurulumunuza bağlı ve yarım bir çözüm koymaktansa açıkça belirtmek daha doğru.
+- **Kurtarma noktası hedefi.** Günlük dump, son yedekten sonraki 24 saate kadar veri kaybı demek. Daha kısası için WAL arşivleme ile point-in-time recovery gerekir.
+- **Geri yükleme tatbikatı.** Denenmemiş yedek yedek değildir; düzenli aralıkla ayrı bir veritabanına geri yükleyip doğrulayın.
+
 ## Bilinen sınırlar
 
 - WebRTC yalnızca `localhost` veya HTTPS üzerinde çalışır. Telefondan LAN IP'siyle test için HTTPS gerekir.
@@ -346,6 +385,5 @@ Sohbet listesi (`GET /api/messages/conversations`) gruplamayı veritabanında ya
 
 Bu proje henüz üretime hazır değil. Kapatılmamış maddeler:
 
-- **Yedekleme ve felaket kurtarma planı yok.**
 - **Backend'de birim testi yok.** Yalnızca `hub-test.mjs` uçtan uca senaryosu var.
 - **Görüşmenin gerçek cihazlarda çalıştığı doğrulanmadı.** Farklı ağlar arasında ses/görüntü akışı ve TURN'ün devreye girmesi henüz sınanmadı.
