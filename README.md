@@ -137,7 +137,13 @@ Bazı ağlar doğrudan bağlantıya izin vermez — simetrik NAT, sıkı kurumsa
 
 İstemci TURN kimlik bilgilerini **çalışma anında** `GET /api/ice` üzerinden alır (kimlik doğrulaması gerekir). Sunucu bunları önbelleğe alır; süresi dolmadan tazelenir ve her aramadan önce kontrol edilir.
 
-Bu uç nokta eklenmeden önce kimlik bilgileri `VITE_TURN_*` olarak derleme sırasında pakete gömülüyordu. İki sorunu vardı: Metered kimlikleri süreli olduğu için dağıtılmış paket bir gün sessizce bozuluyor ve kullanıcıya "ağınızı kontrol edin" gibi yanlış bir sebep gösteriliyordu; ayrıca uygulamayı açan herkes kimlik bilgisini paketten okuyup 20 GB'lık kotayı harcayabiliyordu. **API anahtarı artık yalnızca sunucuda.**
+Bu uç nokta eklenmeden önce kimlik bilgileri `VITE_TURN_*` olarak derleme sırasında pakete gömülüyordu. Kazanç şu:
+
+- **API anahtarı artık yalnızca sunucuda.** Anahtarla istenildiği kadar yeni TURN kimliği üretilebildiği için pakete girmesi en kötüsüydü.
+- **Kimlik bilgisini değiştirmek yeniden derleme gerektirmiyor.** Panelden yenile, sunucu önbelleği dolunca yeni değeri dağıtır; ön yüze dokunmak gerekmez.
+- **TURN kimliği paketten okunup kotanız harcanamaz.**
+
+Dürüst olmak gerekirse son madde kısmi bir kazanç: tarayıcıya inen kimlik bilgisi ağ trafiğinden yine görülebilir — bu, tarayıcıda TURN kullanmanın doğasında var. Metered panelinden verilen kimlik varsayılan olarak **kalıcıdır**, kendiliğinden sona ermez. Gerçekten kısa ömürlü kimlik isterseniz Metered'ın "auto-expiring credentials" API'si var; `IceServerProvider` içindeki `FetchMeteredAsync` o uca çevrilirse yapı geri kalanıyla uyumlu çalışır.
 
 Yapılandırma yoksa yalnızca public STUN kullanılır; doğrudan bağlanamayan kullanıcılar bunu söyleyen bir hata görür.
 

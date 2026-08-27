@@ -17,10 +17,14 @@ public record IceConfigDto(
 
 // TURN kimlik bilgilerini istemciye çalışma anında verir.
 //
-// Eskiden bunlar VITE_TURN_* olarak derlenmiş pakete gömülüyordu: süresi
-// dolduğunda dağıtılmış paket bozuluyor, üstelik kimlik bilgisi uygulamayı
-// açan herkese görünüyordu. Artık API anahtarı sunucuda kalıyor ve istemci
-// yalnızca süreli kimlik alıyor.
+// Eskiden bunlar VITE_TURN_* olarak derlenmiş pakete gömülüyordu. Asıl sorun
+// API anahtarının pakete girmesiydi: onunla istenildiği kadar yeni kimlik
+// üretilebilir. Artık anahtar sunucuda kalıyor ve kimlik bilgisini değiştirmek
+// ön yüzü yeniden derlemeyi gerektirmiyor.
+//
+// Not: Metered panelinden verilen kimlik varsayılan olarak kalıcıdır. Gerçekten
+// kısa ömürlü kimlik için sağlayıcının auto-expiring credentials ucu kullanılmalı;
+// aşağıdaki FetchMeteredAsync o uca çevrilirse yapının kalanı aynı çalışır.
 public class IceServerProvider
 {
     private readonly IceOptions _options;
@@ -65,12 +69,17 @@ public class IceServerProvider
     private async Task<IceConfigDto> BuildAsync(CancellationToken ct)
     {
         var servers = new List<IceServerDto>();
-        if (_options.StunUrls.Length > 0)
-            servers.Add(new IceServerDto(_options.StunUrls, null, null));
 
-        var turn = _options.UsesMetered
+        // Metered yanıtı kendi STUN uçlarını da içerir. TURN ile aynı ağdan
+        // geldikleri için aday toplama daha tutarlı oluyor; yapılandırmadaki
+        // public STUN'lar yedek olarak kalıyor.
+        var (turn, discoveredStun) = _options.UsesMetered
             ? await FetchMeteredAsync(ct)
-            : StaticTurn();
+            : (StaticTurn(), Array.Empty<string>());
+
+        var stun = discoveredStun.Concat(_options.StunUrls).Distinct().ToArray();
+        if (stun.Length > 0)
+            servers.Add(new IceServerDto(stun, null, null));
 
         if (turn is not null) servers.Add(turn);
         else if (_options.UsesMetered)
@@ -91,7 +100,7 @@ public class IceServerProvider
             ? new IceServerDto(_options.TurnUrls, _options.TurnUsername, _options.TurnCredential)
             : null;
 
-    private async Task<IceServerDto?> FetchMeteredAsync(CancellationToken ct)
+    private async Task<(IceServerDto? Turn, string[] Stun)> FetchMeteredAsync(CancellationToken ct)
     {
         var url = $"https://{_options.MeteredSubdomain}.metered.live/api/v1/turn/credentials" +
                   $"?apiKey={Uri.EscapeDataString(_options.MeteredApiKey!)}";
@@ -105,24 +114,31 @@ public class IceServerProvider
             if (!res.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Metered {Status} döndü.", (int)res.StatusCode);
-                return null;
+                return (null, []);
             }
 
-            var entries = await res.Content.ReadFromJsonAsync<MeteredEntry[]>(cancellationToken: ct);
-            var turn = entries?
+            var entries = await res.Content.ReadFromJsonAsync<MeteredEntry[]>(cancellationToken: ct)
+                ?? [];
+
+            var stun = entries
+                .Where(e => e.Urls?.StartsWith("stun:") == true)
+                .Select(e => e.Urls!)
+                .ToArray();
+
+            var turn = entries
                 .Where(e => e.Urls is not null && (e.Urls.StartsWith("turn:") || e.Urls.StartsWith("turns:")))
                 .ToArray();
 
-            if (turn is null || turn.Length == 0) return null;
+            if (turn.Length == 0) return (null, stun);
 
             // Tüm adresler aynı kimlik bilgisini taşır; ilkini kullanıyoruz.
-            return new IceServerDto(
-                turn.Select(t => t.Urls!).ToArray(), turn[0].Username, turn[0].Credential);
+            return (new IceServerDto(
+                turn.Select(t => t.Urls!).ToArray(), turn[0].Username, turn[0].Credential), stun);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Metered kimlik bilgisi çekilemedi.");
-            return null;
+            return (null, []);
         }
     }
 
