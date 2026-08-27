@@ -180,6 +180,36 @@ function readEnvLocal() {
   )
 }
 
+// Kimlik bilgilerinin asıl kaynağı artık backend: GET /api/ice. Tarayıcının
+// gerçekte kullanacağı değerleri sınamak için onları buradan almak gerekir.
+async function fetchFromApi() {
+  const api = process.env.HD_API || 'http://localhost:5088'
+  const verifier = crypto.createHash('sha256')
+    .update('hellodoctor:auth:v1:1234').digest('base64')
+
+  const login = await fetch(`${api}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'hasta@hellodoctor.com', password: verifier, role: 'Patient' }),
+  })
+  if (!login.ok) throw new Error(`giriş başarısız: ${login.status}`)
+  const { token } = await login.json()
+
+  const res = await fetch(`${api}/api/ice`, { headers: { Authorization: `Bearer ${token}` } })
+  if (!res.ok) throw new Error(`/api/ice ${res.status}`)
+  const config = await res.json()
+
+  const turn = config.iceServers.find((s) =>
+    (Array.isArray(s.urls) ? s.urls : [s.urls]).some((u) => u.startsWith('turn')))
+  if (!turn) return null
+
+  return {
+    urls: (Array.isArray(turn.urls) ? turn.urls : [turn.urls]).join(','),
+    username: turn.username || '',
+    credential: turn.credential || '',
+  }
+}
+
 // turn:host:port?transport=tcp → { host, port, udp }
 function parseUrl(url) {
   const m = /^turns?:([^:?]+)(?::(\d+))?(?:\?(.*))?$/.exec(url.trim())
@@ -193,17 +223,40 @@ function parseUrl(url) {
 }
 
 const [argUrl, argUser, argPass] = process.argv.slice(2)
-const env = readEnvLocal()
 
-const urls = (argUrl || env.VITE_TURN_URLS || '').split(',').map((s) => s.trim()).filter(Boolean)
-const username = argUser || env.VITE_TURN_USERNAME || ''
-const password = argPass || env.VITE_TURN_CREDENTIAL || ''
+// Öncelik: komut satırı → backend (/api/ice) → eski .env.local
+let source = 'komut satırı'
+let raw = argUrl ? { urls: argUrl, username: argUser || '', credential: argPass || '' } : null
+
+if (!raw) {
+  try {
+    raw = await fetchFromApi()
+    source = 'backend /api/ice'
+  } catch (err) {
+    console.error(`/api/ice okunamadı (${err.message}), .env.local'e düşülüyor\n`)
+  }
+}
+
+if (!raw) {
+  const env = readEnvLocal()
+  if (env.VITE_TURN_URLS) {
+    raw = { urls: env.VITE_TURN_URLS, username: env.VITE_TURN_USERNAME || '', credential: env.VITE_TURN_CREDENTIAL || '' }
+    source = '.env.local (eski yöntem)'
+  }
+}
+
+const urls = (raw?.urls || '').split(',').map((s) => s.trim()).filter(Boolean)
+const username = raw?.username || ''
+const password = raw?.credential || ''
 
 if (!urls.length) {
-  console.error('TURN adresi yok. frontend/.env.local içinde VITE_TURN_URLS tanımlayın')
-  console.error('veya: node turn-test.mjs turn:host:3478 kullanici sifre')
+  console.error('TURN adresi bulunamadı.')
+  console.error('Backend çalışıyor ve Ice__MeteredApiKey tanımlı mı? Ya da:')
+  console.error('  node turn-test.mjs turn:host:3478 kullanici sifre')
   process.exit(2)
 }
+
+console.log(`kaynak: ${source}`)
 
 console.log(`\nTURN doğrulaması — kullanıcı: ${username || '(yok)'}\n`)
 

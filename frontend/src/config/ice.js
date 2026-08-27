@@ -1,39 +1,52 @@
-// WebRTC ICE yapılandırması. Değerler ortam değişkenlerinden gelir (.env.local),
-// böylece TURN kimlik bilgileri kaynak koda gömülmez.
+// WebRTC ICE yapılandırması sunucudan çalışma anında gelir (GET /api/ice).
+//
+// Eskiden VITE_TURN_* değişkenlerinden okunuyordu; Vite bunları derleme
+// sırasında pakete gömdüğü için iki sorun vardı: kimlik bilgisinin süresi
+// dolduğunda dağıtılmış paket sessizce bozuluyor (ve kullanıcıya "ağınızı
+// kontrol edin" gibi yanlış bir sebep gösteriliyor), ayrıca uygulamayı açan
+// herkes kimlik bilgisini okuyup kotayı harcayabiliyordu.
 
-const parseList = (value) =>
-  (value || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
+import api from '../api/client'
 
-// STUN yalnızca dış adresi bildirir, trafik taşımaz — public sunucular yeterlidir.
-const DEFAULT_STUN = ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302']
+// Sunucuya ulaşılamazsa görüşme hiç kurulamasın istemiyoruz: STUN'la doğrudan
+// bağlantı çoğu ağda çalışır. TURN gerektiren durumlarda hata mesajı bunu söyler.
+const FALLBACK = {
+  rtc: {
+    iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }],
+    iceTransportPolicy: 'all',
+  },
+  hasTurn: false,
+}
 
-const turnUrls = parseList(import.meta.env.VITE_TURN_URLS)
+let cache = null
 
-export const hasTurn = turnUrls.length > 0
+const toRtcConfig = (data) => ({
+  rtc: {
+    iceServers: data.iceServers.map((s) => ({
+      urls: s.urls,
+      // undefined bırakılmalı: null username RTCPeerConnection'ı hataya sokar.
+      username: s.username || undefined,
+      credential: s.credential || undefined,
+    })),
+    iceTransportPolicy: data.iceTransportPolicy === 'relay' ? 'relay' : 'all',
+  },
+  hasTurn: !!data.hasTurn,
+  expiresAt: Date.parse(data.expiresAt) || 0,
+})
 
-export function buildIceServers() {
-  const stun = parseList(import.meta.env.VITE_STUN_URLS)
-  const servers = [{ urls: stun.length ? stun : DEFAULT_STUN }]
+// Süresi dolmak üzereyse tazeler. Sunucu erişilemezse elde ne varsa onunla
+// devam eder — arama, kimlik tazelenemedi diye hiç başlamamış olmaz.
+export async function getIceConfig() {
+  const fresh = cache && Date.now() < cache.expiresAt - 60_000
+  if (fresh) return cache
 
-  if (hasTurn) {
-    servers.push({
-      urls: turnUrls,
-      username: import.meta.env.VITE_TURN_USERNAME || undefined,
-      credential: import.meta.env.VITE_TURN_CREDENTIAL || undefined,
-    })
+  try {
+    const { data } = await api.get('/ice')
+    cache = toRtcConfig(data)
+  } catch {
+    if (!cache) return FALLBACK
   }
-
-  return servers
+  return cache
 }
 
-// 'relay' yapılırsa doğrudan bağlantı denenmez; TURN'ün gerçekten çalıştığını
-// doğrulamak için kullanılır. Üretimde 'all' kalmalı.
-export const iceTransportPolicy =
-  import.meta.env.VITE_ICE_TRANSPORT_POLICY === 'relay' ? 'relay' : 'all'
-
-export function buildRtcConfig() {
-  return { iceServers: buildIceServers(), iceTransportPolicy }
-}
+export const clearIceCache = () => { cache = null }

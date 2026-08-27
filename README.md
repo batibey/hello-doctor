@@ -73,6 +73,12 @@ Ayarlar `backend/appsettings.json` içinde; her biri ortam değişkeniyle geçer
 | `ConnectionStrings__Postgres` | Veritabanı bağlantı dizesi |
 | `Cors__AllowedOrigins__0`, `__1`… | İzin verilen origin'ler. **Üretimde zorunlu.** |
 | `RateLimit__LoginPerMinute` | IP başına dakikada giriş denemesi (varsayılan 5) |
+| `Ice__MeteredApiKey` | Metered API anahtarı. **Asla appsettings.json'a yazmayın.** |
+| `Ice__MeteredSubdomain` | Metered panelindeki alt alan adı |
+| `Ice__TurnUrls__0`, `__1`… | Kendi TURN sunucunuz (Metered yerine) |
+| `Ice__TurnUsername`, `Ice__TurnCredential` | Kendi TURN sunucunuzun kimlik bilgileri |
+| `Ice__CacheMinutes` | TURN kimliğinin önbellek süresi (varsayılan 30) |
+| `Ice__IceTransportPolicy` | `relay` yapılırsa doğrudan bağlantı denenmez (test için) |
 | `Smtp__Host`, `Smtp__Port` | Şifre sıfırlama e-postası için SMTP sunucusu |
 | `Smtp__User`, `Smtp__Password` | SMTP kimlik bilgileri (gerekiyorsa) |
 | `Smtp__FromAddress` | Gönderen adresi |
@@ -127,49 +133,64 @@ Sunucu bu sinyalleri körlemesine iletmez: `CallUser` ile kurulan çifti kaydede
 
 Bazı ağlar doğrudan bağlantıya izin vermez — simetrik NAT, sıkı kurumsal güvenlik duvarları, bazı mobil operatörler. Bu durumda trafiği aktaran bir **TURN** sunucusu gerekir; pratikte görüşmelerin yaklaşık %10-20'si bunu gerektirir.
 
-TURN yapılandırması `frontend/.env.local` içinden gelir (`.env.example` dosyasını kopyalayın). Tanımlanmazsa yalnızca public STUN kullanılır ve doğrudan bağlanamayan kullanıcılar hata mesajı görür.
+### ICE yapılandırması sunucudan gelir
+
+İstemci TURN kimlik bilgilerini **çalışma anında** `GET /api/ice` üzerinden alır (kimlik doğrulaması gerekir). Sunucu bunları önbelleğe alır; süresi dolmadan tazelenir ve her aramadan önce kontrol edilir.
+
+Bu uç nokta eklenmeden önce kimlik bilgileri `VITE_TURN_*` olarak derleme sırasında pakete gömülüyordu. İki sorunu vardı: Metered kimlikleri süreli olduğu için dağıtılmış paket bir gün sessizce bozuluyor ve kullanıcıya "ağınızı kontrol edin" gibi yanlış bir sebep gösteriliyordu; ayrıca uygulamayı açan herkes kimlik bilgisini paketten okuyup 20 GB'lık kotayı harcayabiliyordu. **API anahtarı artık yalnızca sunucuda.**
+
+Yapılandırma yoksa yalnızca public STUN kullanılır; doğrudan bağlanamayan kullanıcılar bunu söyleyen bir hata görür.
 
 ### Seçenek 1 — Metered (ayda 20 GB ücretsiz)
 
 Kayıt gerekiyor; kayıtsız kullanılan eski `openrelay.metered.ca` ucu kapatılmıştır.
 
 1. [metered.ca](https://www.metered.ca/stun-turn) üzerinden ücretsiz hesap açın
-2. Panelden TURN kullanıcı adı ve şifresini alın
-3. `frontend/.env.local` dosyasına yazın:
+2. Panelden **"Show API Key"** ile API anahtarını alın (TURN kullanıcı/şifresini değil — sunucu onları anahtarla kendisi üretir)
+3. Anahtarı ortam değişkeni olarak verin:
 
 ```bash
-VITE_TURN_URLS=turn:global.relay.metered.ca:80,turn:global.relay.metered.ca:443
-VITE_TURN_USERNAME=panelden-gelen-kullanici
-VITE_TURN_CREDENTIAL=panelden-gelen-sifre
+export Ice__MeteredApiKey="panelden-gelen-api-anahtari"
+export Ice__MeteredSubdomain="hidoctor"   # panelinizdeki alt alan adı
 ```
 
-### Seçenek 2 — Yerel coturn (ücretsiz, yalnızca LAN)
+Anahtarı `appsettings.json` içine **yazmayın**; o dosya git'e giriyor.
+
+### Seçenek 2 — Kendi TURN sunucunuz (coturn)
 
 Aynı ağdaki iki cihaz arasında test için yeterli; internet üzerinden görüşme için sunucunun genel IP'den erişilebilir olması gerekir.
 
 ```bash
 TURN_EXTERNAL_IP=$(ipconfig getifaddr en0) docker compose --profile turn up -d
+
+export Ice__TurnUrls__0="turn:192.168.1.101:3478"   # makinenizin LAN IP'si
+export Ice__TurnUsername="hellodoctor"
+export Ice__TurnCredential="turn_dev_pw"
 ```
 
-Kimlik bilgileri varsayılan olarak `hellodoctor` / `turn_dev_pw` (`TURN_USER`, `TURN_PASSWORD` ile değiştirilebilir).
+Konteyner kimlik bilgileri varsayılan olarak `hellodoctor` / `turn_dev_pw` (`TURN_USER`, `TURN_PASSWORD` ile değiştirilebilir).
 
 ### Doğrulama
-
-Kimlik bilgilerini girdikten sonra gerçekten çalıştığını sınayın:
 
 ```bash
 cd frontend && node turn-test.mjs
 ```
 
-Sunucuya bir TURN `Allocate` isteği gönderip relay adresi alınabiliyor mu diye bakar. Yanlış şifre `401`, ulaşılamayan adres zaman aşımı verir — böylece tarayıcıda "arama kurulamadı" hatasının TURN'den mi başka bir katmandan mı geldiği belirsiz kalmaz.
+Kimlik bilgilerini `/api/ice`'tan çeker — yani tarayıcının gerçekte kullanacağı değerleri sınar — ve TURN sunucusuna bir `Allocate` isteği gönderip relay adresi alınabiliyor mu diye bakar. Yanlış şifre `401`, ulaşılamayan adres zaman aşımı verir; böylece tarayıcıdaki "arama kurulamadı" hatasının TURN'den mi başka bir katmandan mı geldiği belirsiz kalmaz.
+
+Backend çalışmıyorsa doğrudan da verilebilir:
+
+```bash
+node turn-test.mjs turn:host:3478 kullanici sifre
+```
 
 Uçtan uca doğrulamak için doğrudan bağlantıyı tamamen kapatın:
 
 ```bash
-VITE_ICE_TRANSPORT_POLICY=relay
+export Ice__IceTransportPolicy=relay
 ```
 
-Bu ayarla görüşme kurulabiliyorsa TURN gerçekten devrededir. Üretimde boş bırakın.
+Bu ayarla görüşme kurulabiliyorsa TURN gerçekten devrededir. Üretimde `all` kalmalı.
 
 ### Hata durumları
 
@@ -209,7 +230,6 @@ Sorgu desenlerine göre indeksler: `(ConversationId, SentAt)` sohbet açılış�
 
 Bu proje henüz üretime hazır değil. Kapatılmamış maddeler:
 
-- **TURN kimlik bilgileri derlenmiş pakete gömülü.** Süreleri dolunca görüşmeler sessizce bozulur ve kullanıcıya yanlış sebep gösterilir; ayrıca kota herkese açık. Çözüm: kimlik bilgilerini backend'den çalışma anında veren bir uç nokta.
 - **Randevu iş kuralları eksik.** Hasta kendi randevusunu onaylayabiliyor, geçmişe randevu alınabiliyor, çakışma kontrolü yok.
 - **HTTPS zorlaması ve HSTS yok.** Yapılandırılmış log, health check ve yedekleme planı da yok.
 - **Backend'de birim testi yok.** Yalnızca `hub-test.mjs` uçtan uca senaryosu var.

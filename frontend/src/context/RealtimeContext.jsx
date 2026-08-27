@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { useAuth } from './AuthContext'
-import { buildRtcConfig, hasTurn } from '../config/ice'
+import { getIceConfig, clearIceCache } from '../config/ice'
 
 const RealtimeContext = createContext(null)
 
@@ -30,6 +30,18 @@ export function RealtimeProvider({ children }) {
   const [camOff, setCamOff] = useState(false)
   const pendingCandidates = useRef([])
   const timeoutRef = useRef(null)
+
+  // ICE yapılandırması sunucudan geliyor ve kimlik bilgileri süreli. Ref'te
+  // tutulup her aramadan önce tazeleniyor; hasTurn hata mesajını belirliyor.
+  const iceRef = useRef(null)
+  const [hasTurn, setHasTurn] = useState(false)
+
+  const refreshIce = useCallback(async () => {
+    const cfg = await getIceConfig()
+    iceRef.current = cfg
+    setHasTurn(cfg.hasTurn)
+    return cfg
+  }, [])
 
   const isConnected = () => connRef.current?.state === signalR.HubConnectionState.Connected
 
@@ -163,7 +175,10 @@ export function RealtimeProvider({ children }) {
 
   // ---------- Peer connection ----------
   const createPeer = useCallback((peerId) => {
-    const pc = new RTCPeerConnection(buildRtcConfig())
+    // Arama başlarken refreshIce çağrıldığı için burada hazır olması beklenir;
+    // yine de yoksa STUN'a düşüp görüşmeyi büsbütün engellemiyoruz.
+    const rtc = iceRef.current?.rtc ?? { iceServers: [], iceTransportPolicy: 'all' }
+    const pc = new RTCPeerConnection(rtc)
 
     pc.onicecandidate = (e) => {
       if (e.candidate) notify('SendIceCandidate', peerId, e.candidate)
@@ -180,8 +195,9 @@ export function RealtimeProvider({ children }) {
           setCall((c) => (c && c.phase === 'active' ? { ...c, phase: 'reconnecting' } : c))
           break
         case 'failed':
+          // Ref'ten okunuyor: state'i kapatsak createPeer'ın kapanışı bayat kalırdı.
           failCall(
-            hasTurn
+            iceRef.current?.hasTurn
               ? 'Bağlantı kurulamadı. Ağ bağlantınızı kontrol edip tekrar deneyin.'
               : 'Bağlantı kurulamadı. Ağınız doğrudan bağlantıya izin vermiyor olabilir; bu durumda TURN sunucusu gerekir.',
           )
@@ -203,6 +219,8 @@ export function RealtimeProvider({ children }) {
       peerColor: peer.avatarColor, callType, isCaller: true,
     })
     try {
+      // TURN kimlik bilgileri süreli; her aramadan önce tazeleniyor.
+      await refreshIce()
       await getMedia(callType)
       const res = await invoke('CallUser', peer.id, callType)
       // Karşı taraf çevrimdışı ya da meşguldü: zil hiç çalmadı, beklemenin
@@ -212,13 +230,14 @@ export function RealtimeProvider({ children }) {
       console.error('startCall failed', err)
       failCall(mediaErrorMessage(err, callType), { notifyPeer: false })
     }
-  }, [getMedia, invoke, failCall])
+  }, [getMedia, invoke, failCall, refreshIce])
 
   const acceptCall = useCallback(async () => {
     const cur = callRef.current
     if (!cur) return
     setCall((c) => c && { ...c, phase: 'connecting' })
     try {
+      await refreshIce()
       await getMedia(cur.callType)
       await invoke('AcceptCall', cur.peerId)
     } catch (err) {
@@ -226,7 +245,7 @@ export function RealtimeProvider({ children }) {
       await notify('RejectCall', cur.peerId, 'error')
       failCall(mediaErrorMessage(err, cur.callType), { notifyPeer: false })
     }
-  }, [getMedia, invoke, notify, failCall])
+  }, [getMedia, invoke, notify, failCall, refreshIce])
 
   const rejectCall = useCallback(async () => {
     const cur = callRef.current
@@ -282,6 +301,13 @@ export function RealtimeProvider({ children }) {
   const onTyping = useCallback((fn) => { typingHandlers.current.add(fn); return () => typingHandlers.current.delete(fn) }, [])
 
   // ---------- Connection lifecycle ----------
+  // ICE yapılandırmasını önden çekiyoruz: ilk aramada zil çalmadan önce
+  // ağ gidiş dönüşü beklenmesin ve hasTurn hata mesajı için hazır olsun.
+  useEffect(() => {
+    if (!user) { clearIceCache(); return }
+    refreshIce()
+  }, [user, refreshIce])
+
   useEffect(() => {
     if (!user) return
     const token = localStorage.getItem('hd_token')

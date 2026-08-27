@@ -38,6 +38,11 @@ builder.Services.AddSingleton<PasswordService>();
 builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
 builder.Services.AddScoped<EmailSender>();
 
+builder.Services.Configure<IceOptions>(builder.Configuration.GetSection(IceOptions.SectionName));
+builder.Services.AddHttpClient();
+// Önbellek örnek içinde tutulduğu için singleton.
+builder.Services.AddSingleton<IceServerProvider>();
+
 // Her origin'e açık bir politika AllowCredentials ile birleşince, herhangi bir
 // sitenin kullanıcının tarayıcısı üzerinden kimlikli istek atmasına izin verir.
 // Üretimde origin listesi açıkça verilmeli; verilmezse uygulama açılmaz.
