@@ -5,7 +5,8 @@ using Microsoft.EntityFrameworkCore;
 namespace HelloDoctor.Api.Data;
 
 // Applies migrations and seeds demo accounts on startup.
-// Seeding is idempotent: it no-ops once any user exists.
+// Seeding is idempotent: it no-ops once any user exists, and never runs
+// outside development.
 public static class DbInitializer
 {
     public static async Task InitializeAsync(IServiceProvider services)
@@ -13,8 +14,21 @@ public static class DbInitializer
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var hasher = scope.ServiceProvider.GetRequiredService<PasswordService>();
+        var env = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>()
+            .CreateLogger(nameof(DbInitializer));
 
         await db.Database.MigrateAsync();
+
+        // Demo hesapların şifresi "1234" ve hem README'de hem giriş ekranında
+        // yazılı. Üretimde tohumlanırsa doktor yetkili hesaplar herkesin bildiği
+        // şifreyle açılır — migration'lar uygulansın, veri uygulanmasın.
+        if (!env.IsDevelopment())
+        {
+            logger.LogInformation(
+                "Ortam {Environment}: demo verisi tohumlanmadı.", env.EnvironmentName);
+            return;
+        }
 
         if (await db.Users.AnyAsync())
             return;

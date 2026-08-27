@@ -32,7 +32,7 @@ Migration'lar ve demo verisi backend ilk açılışta otomatik uygulanır.
 
 ## Demo hesaplar
 
-Tüm şifreler `1234`.
+Tüm şifreler `1234`. **Yalnızca `Development` ortamında tohumlanır** — şifreleri burada ve giriş ekranında yazılı olduğu için üretimde oluşturulmaları tüm sistemi açardı. Üretim derlemesinde giriş ekranındaki demo paneli de yer almaz, `/api/auth/demo-accounts` uç noktası `404` döner.
 
 | Rol | E-posta |
 |---|---|
@@ -62,14 +62,19 @@ Ayarlar `backend/appsettings.json` içinde; her biri ortam değişkeniyle geçer
 | `Jwt__Key` | JWT imza anahtarı. **Üretimde zorunlu**, en az 32 bayt. |
 | `Jwt__ExpiryDays` | Token ömrü (varsayılan 7) |
 | `ConnectionStrings__Postgres` | Veritabanı bağlantı dizesi |
+| `Cors__AllowedOrigins__0`, `__1`… | İzin verilen origin'ler. **Üretimde zorunlu.** |
+| `RateLimit__LoginPerMinute` | IP başına dakikada giriş denemesi (varsayılan 5) |
 
 Geliştirmede anahtar `appsettings.Development.json` içinden gelir, ek kurulum gerekmez. Bu değer yalnızca yereldir ve üretimde kullanılmamalıdır.
 
-Üretimde anahtar tanımsız veya 32 bayttan kısaysa uygulama **açılmayı reddeder** — zayıf anahtarla token imzalamaktansa erken hata vermeyi tercih eder.
+Üretimde anahtar tanımsız veya 32 bayttan kısaysa uygulama **açılmayı reddeder** — zayıf anahtarla token imzalamaktansa erken hata vermeyi tercih eder. Aynı şey CORS için de geçerli: `Cors__AllowedOrigins` boşken üretimde açılmaz, çünkü her origin'e açık bir politika `AllowCredentials` ile birleşince herhangi bir sitenin kullanıcının tarayıcısı üzerinden kimlikli istek atmasına izin verirdi. Geliştirmede liste boş bırakılabilir; LAN IP'si ve tünel adresi sürekli değiştiği için orada serbesttir.
+
+Giriş uç noktası IP başına dakikada 5 denemeyle sınırlı; aşan istek `429` ve `Retry-After` alır. `appsettings.Development.json` bu değeri 50'ye çekiyor, yoksa `hub-test.mjs` arka arkaya çalıştırıldığında kendi kendini kilitler.
 
 ```bash
 export Jwt__Key="$(openssl rand -base64 48)"
 export ConnectionStrings__Postgres="Host=…;Database=…;Username=…;Password=…"
+export Cors__AllowedOrigins__0="https://hellodoctor.example"
 dotnet run --no-launch-profile
 ```
 
@@ -156,3 +161,17 @@ Sorgu desenlerine göre indeksler: `(ConversationId, SentAt)` sohbet açılış�
 - WebRTC yalnızca `localhost` veya HTTPS üzerinde çalışır. Telefondan LAN IP'siyle test için HTTPS gerekir.
 - TURN yapılandırılmadıysa doğrudan bağlanamayan kullanıcılar görüşemez (hata mesajı gösterilir).
 - Veritabanı şifresi `appsettings.json` içinde geliştirme değeriyle duruyor; üretimde `ConnectionStrings__Postgres` ile geçersiz kılın.
+- Giriş sınırı `RemoteIpAddress`'e göre bölümleniyor. Ters vekil sunucu arkasında tüm istekler vekilin IP'sinden görünür; o kurulumda `UseForwardedHeaders` yapılandırılmalı.
+- `CallHub` bağlantı ve görüşme eşleşmelerini süreç belleğinde tutuyor — tek instance'a bağlı. Yatay ölçekleme için Redis backplane gerekir.
+
+## Canlıya çıkmadan önce
+
+Bu proje henüz üretime hazır değil. Kapatılmamış maddeler:
+
+- **Kayıt ve şifre sıfırlama akışı yok.** Gerçek bir kullanıcının hesap açma yolu bulunmuyor.
+- **Sohbet ekranındaki "uçtan uca güvenli" ifadesi doğru değil.** Mesajlar sunucuya ve veritabanına düz metin yazılıyor. Sağlık verisi için ya ifade düzeltilmeli ya da iddia karşılanmalı (KVKK).
+- **TURN kimlik bilgileri derlenmiş pakete gömülü.** Süreleri dolunca görüşmeler sessizce bozulur ve kullanıcıya yanlış sebep gösterilir; ayrıca kota herkese açık. Çözüm: kimlik bilgilerini backend'den çalışma anında veren bir uç nokta.
+- **Randevu iş kuralları eksik.** Hasta kendi randevusunu onaylayabiliyor, geçmişe randevu alınabiliyor, çakışma kontrolü yok.
+- **HTTPS zorlaması ve HSTS yok.** Yapılandırılmış log, health check ve yedekleme planı da yok.
+- **Backend'de birim testi yok.** Yalnızca `hub-test.mjs` uçtan uca senaryosu var.
+- **Görüşmenin gerçek cihazlarda çalıştığı doğrulanmadı.** Farklı ağlar arasında ses/görüntü akışı ve TURN'ün devreye girmesi henüz sınanmadı.

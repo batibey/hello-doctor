@@ -2,6 +2,11 @@ import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { Icon } from '../components/ui'
 
+// Demo hesaplar yalnızca geliştirmede tohumlanıyor; üretim derlemesinde bu
+// bölüm hiç yer almasın ki var olmayan hesapların şifresi ekranda durmasın.
+// import.meta.env.DEV `npm run build` sonrası false, blok tree-shake edilir.
+const IS_DEV = import.meta.env.DEV
+
 const DEMO = {
   Patient: { email: 'hasta@hellodoctor.com', password: '1234' },
   Doctor: { email: 'dr.ayse@hellodoctor.com', password: '1234' },
@@ -62,17 +67,21 @@ export default function LoginScreen() {
           </button>
         </form>
 
-        <button onClick={fillDemo} className="btn ghost" style={{ marginTop: 14, fontSize: 13, color: 'var(--text-dim)' }}>
-          Demo bilgilerini doldur ✨
-        </button>
+        {IS_DEV && (
+          <>
+            <button onClick={fillDemo} className="btn ghost" style={{ marginTop: 14, fontSize: 13, color: 'var(--text-dim)' }}>
+              Demo bilgilerini doldur ✨
+            </button>
 
-        <div className="card" style={{ marginTop: 18, fontSize: 12.5 }}>
-          <div className="section-title" style={{ marginBottom: 8 }}>Demo Hesaplar</div>
-          <div className="dim" style={{ lineHeight: 1.7 }}>
-            <b style={{ color: 'var(--text)' }}>Hasta:</b> hasta@hellodoctor.com · 1234<br />
-            <b style={{ color: 'var(--text)' }}>Doktor:</b> dr.ayse@hellodoctor.com · 1234
-          </div>
-        </div>
+            <div className="card" style={{ marginTop: 18, fontSize: 12.5 }}>
+              <div className="section-title" style={{ marginBottom: 8 }}>Demo Hesaplar</div>
+              <div className="dim" style={{ lineHeight: 1.7 }}>
+                <b style={{ color: 'var(--text)' }}>Hasta:</b> hasta@hellodoctor.com · 1234<br />
+                <b style={{ color: 'var(--text)' }}>Doktor:</b> dr.ayse@hellodoctor.com · 1234
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
